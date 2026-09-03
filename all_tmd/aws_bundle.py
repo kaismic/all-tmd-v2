@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -12,14 +11,15 @@ from typing import Any
 
 import yaml
 
-from all_tmd.trial_generator import generate_trials
-
 
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-REQUIRED_CONFIG_FILES = (
+COMMON_FILES = (
     "model.config.yaml",
-    "trial-parameters.json",
+    "study-plan.json",
+    "study-trial.json",
+    "manifests/sydney-166.json",
 )
+EVALUATION_FILES = ("model-lock.json", "manifests/sydney-lopo.json")
 AWS_MLFLOW_TRACKING_URI = "sqlite:////mlflow-data/mlflow.db"
 AWS_MLFLOW_ARTIFACT_LOCATION = "file:///mlflow-data/mlartifacts"
 
@@ -35,85 +35,52 @@ def create_run_bundle(
     ntfy_server: str = "https://ntfy.sh",
     ntfy_topic: str = "",
     ntfy_events: str = "all-trials",
-    ntfy_token_parameter: str = "/all-tmd-v1/ntfy-token",
+    ntfy_token_parameter: str = "/all-tmd-v2/ntfy-token",
     collector_sessions_bucket: str = "",
     collector_sessions_table: str = "",
     auto_stop: bool = True,
     created_at: datetime | None = None,
 ) -> dict[str, Any]:
-    """Create the non-secret configuration bundle consumed by the EC2 worker."""
     if not RUN_ID_PATTERN.fullmatch(run_id):
-        raise ValueError(
-            "run_id must start with an alphanumeric character and contain only "
-            "alphanumeric characters, dots, underscores, or hyphens"
-        )
-    if mode not in {"full", "smoke"}:
-        raise ValueError("mode must be 'full' or 'smoke'")
-    if not git_repository.strip():
-        raise ValueError("git_repository must not be empty")
-    if not re.fullmatch(r"[0-9a-fA-F]{40}", git_commit):
-        raise ValueError("git_commit must be a full 40-character Git SHA")
-    if not collector_sessions_bucket.strip():
-        raise ValueError("collector_sessions_bucket must not be empty")
-    if not collector_sessions_table.strip():
-        raise ValueError("collector_sessions_table must not be empty")
-
+        raise ValueError("invalid run_id")
+    if mode not in {"full", "smoke", "tune"}:
+        raise ValueError("mode must be 'full', 'smoke', or 'tune'")
+    if not git_repository.strip() or not re.fullmatch(r"[0-9a-fA-F]{40}", git_commit):
+        raise ValueError("a repository and full Git commit are required")
+    if not collector_sessions_bucket.strip() or not collector_sessions_table.strip():
+        raise ValueError("collector bucket and table are required")
     root = Path(project_root)
+    required = COMMON_FILES + (() if mode == "tune" else EVALUATION_FILES)
+    for name in required:
+        if not (root / name).is_file():
+            raise FileNotFoundError(f"Required run configuration is missing: {root / name}")
     destination = Path(output_dir)
-    for name in REQUIRED_CONFIG_FILES:
-        path = root / name
-        if not path.is_file():
-            raise FileNotFoundError(f"Required run configuration is missing: {path}")
-
-    parameters_path = root / "trial-parameters.json"
-    parameters = json.loads(parameters_path.read_text(encoding="utf-8"))
-    generated_trials = generate_trials(parameters)
-    trials = generated_trials
-    if mode == "smoke":
-        smoke_trial = deepcopy(generated_trials[0])
-        smoke_trial["training"]["optuna_trials"] = 1
-        trials = [smoke_trial]
-
     destination.mkdir(parents=True, exist_ok=False)
-    model_config_path = root / "model.config.yaml"
-    model_config = yaml.safe_load(model_config_path.read_text(encoding="utf-8"))
-    if not isinstance(model_config, dict):
-        raise ValueError("model.config.yaml must contain a YAML object")
-    mlflow_config = model_config.get("mlflow")
-    if not isinstance(mlflow_config, dict):
-        raise ValueError("model.config.yaml must contain an mlflow object")
-    mlflow_config["enabled"] = True
-    mlflow_config["tracking_uri"] = AWS_MLFLOW_TRACKING_URI
-    mlflow_config["artifact_location"] = AWS_MLFLOW_ARTIFACT_LOCATION
-
+    for name in required:
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / name, target)
+    model_config = yaml.safe_load((destination / "model.config.yaml").read_text(encoding="utf-8"))
+    model_config["mlflow"].update(
+        {
+            "enabled": True,
+            "tracking_uri": AWS_MLFLOW_TRACKING_URI,
+            "artifact_location": AWS_MLFLOW_ARTIFACT_LOCATION,
+        }
+    )
     (destination / "model.config.yaml").write_text(
-        yaml.safe_dump(model_config, sort_keys=False),
-        encoding="utf-8",
+        yaml.safe_dump(model_config, sort_keys=False), encoding="utf-8"
     )
-    shutil.copy2(
-        root / "trial-parameters.json",
-        destination / "trial-parameters.json",
-    )
-    trials_path = destination / "trials.json"
-    trials_path.write_text(
-        json.dumps(trials, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-
     timestamp = created_at or datetime.now(timezone.utc)
-    config_files = (*REQUIRED_CONFIG_FILES, "trials.json")
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": run_id,
         "mode": mode,
         "created_at": timestamp.astimezone(timezone.utc).isoformat(),
         "git_repository": git_repository,
         "git_commit": git_commit.lower(),
-        "trial_count": len(trials),
-        "generated_trial_count": len(generated_trials),
-        "config_sha256": {
-            name: _sha256(destination / name) for name in config_files
-        },
+        "expected_parent_runs": 1 if mode == "smoke" else (0 if mode == "tune" else 33),
+        "config_sha256": {name: _sha256(destination / name) for name in required},
         "notifications": {
             "server": ntfy_server,
             "topic": ntfy_topic,
@@ -127,36 +94,26 @@ def create_run_bundle(
         "auto_stop": auto_stop,
     }
     (destination / "run-manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
     return manifest
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Create an AWS All-TMD run configuration bundle"
-    )
+    parser = argparse.ArgumentParser(description="Create an AWS ALL-TMD v2 study bundle")
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--output", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--git-repository", required=True)
     parser.add_argument("--git-commit", required=True)
-    parser.add_argument("--mode", choices=("full", "smoke"), default="full")
+    parser.add_argument("--mode", choices=("full", "smoke", "tune"), default="full")
     parser.add_argument("--ntfy-server", default="https://ntfy.sh")
     parser.add_argument("--ntfy-topic", default="")
     parser.add_argument("--ntfy-events", default="all-trials")
     parser.add_argument("--collector-sessions-bucket", required=True)
     parser.add_argument("--collector-sessions-table", required=True)
-    parser.add_argument(
-        "--ntfy-token-parameter",
-        default="/all-tmd-v1/ntfy-token",
-    )
-    parser.add_argument(
-        "--no-auto-stop",
-        action="store_true",
-        help="leave the EC2 instance running after result upload",
-    )
+    parser.add_argument("--ntfy-token-parameter", default="/all-tmd-v2/ntfy-token")
+    parser.add_argument("--no-auto-stop", action="store_true")
     args = parser.parse_args(argv)
     manifest = create_run_bundle(
         args.project_root,
@@ -173,10 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         collector_sessions_table=args.collector_sessions_table,
         auto_stop=not args.no_auto_stop,
     )
-    print(
-        f"Created {manifest['mode']} run bundle {manifest['run_id']} "
-        f"with {manifest['trial_count']} trial(s)"
-    )
+    print(f"Created {manifest['mode']} run bundle {manifest['run_id']}")
     return 0
 
 

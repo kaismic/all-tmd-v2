@@ -1,14 +1,14 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$BudgetEmail,
-    [string]$StackName = "all-tmd-v1-worker",
+    [string]$StackName = "all-tmd-v2-worker",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = "",
     [string]$InstanceType = "c7i.4xlarge",
     [int]$DataVolumeSizeGiB = 200,
     [string]$BucketName = "",
     [string]$CollectorStackName = "transport-data-collector",
-    [string]$NtfyTokenParameterName = "/all-tmd-v1/ntfy-token",
+    [string]$NtfyTokenParameterName = "/all-tmd-v2/ntfy-token",
     [switch]$LeaveRunning
 )
 
@@ -79,7 +79,7 @@ $ready = $false
 for ($attempt = 0; $attempt -lt 60 -and -not $ready; $attempt++) {
     try {
         $commandId = Send-AllTmdSsmCommand -InstanceId $instanceId -Commands @(
-            "test -f /var/lib/all-tmd-v1/bootstrap-complete",
+            "test -f /var/lib/all-tmd-v2/bootstrap-complete",
             "docker compose version",
             "mountpoint -q /mnt/all-tmd-data"
         ) -Comment "Validate All-TMD worker bootstrap"

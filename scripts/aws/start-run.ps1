@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$RunId,
-    [string]$StackName = "all-tmd-v1-worker",
+    [string]$StackName = "all-tmd-v2-worker",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = ""
 )
@@ -17,7 +17,7 @@ $outputs = Get-AllTmdStackOutputs -StackName $StackName
 $instanceId = $outputs.InstanceId
 $bucket = $outputs.BucketName
 
-$manifestUri = "s3://$bucket/all-tmd-v1/config/$RunId/run-manifest.json"
+$manifestUri = "s3://$bucket/all-tmd-v2/config/$RunId/run-manifest.json"
 $manifestJson = Invoke-AllTmdAws -Arguments @("s3", "cp", $manifestUri, "-")
 try {
     $manifest = ($manifestJson -join "`n") | ConvertFrom-Json
@@ -44,7 +44,7 @@ elseif ($state -in @("stopping", "shutting-down", "terminated")) {
 }
 Wait-AllTmdSsmOnline -InstanceId $instanceId
 
-$runnerUri = "s3://$bucket/all-tmd-v1/config/$RunId/run-trials-cloud.sh"
+$runnerUri = "s3://$bucket/all-tmd-v2/config/$RunId/run-trials-cloud.sh"
 $commandId = Send-AllTmdSsmCommand -InstanceId $instanceId -Commands @(
     # AWS-RunShellScript executes this wrapper with /bin/sh, not Bash.
     "set -eu",

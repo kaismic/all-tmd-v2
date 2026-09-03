@@ -3,9 +3,9 @@ requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "all-tmd-classifier"
-version = "0.1.0"
-description = "Extensible multi-source transport-mode classifier pipeline."
+name = "all-tmd-v2"
+version = "0.2.0"
+description = "Controlled NOR-TMD to Sydney transport-mode transfer study."
 requires-python = ">=3.12"
 dependencies = [
   "joblib>=1.5.0",

@@ -192,13 +192,23 @@ def log_dataset_inputs(
 ) -> None:
     import mlflow
 
-    run_dir = config.run_dir()
+    from all_tmd.windowing import feature_output_dir
+
+    def feature_source(source_name: str) -> Path:
+        try:
+            return feature_output_dir(config, source_name)
+        except FileNotFoundError:
+            # Unit-level callers may log an in-memory frame without materialized
+            # feature artifacts. Production training always resolves the
+            # content-addressed path before this function is reached.
+            return config.run_dir() / "features" / "in-memory" / source_name
+
     feature_names = config.trial.feature_names
     source_dataset = (
         f"{config.trial.train_dataset}-training-features",
         "training",
         split_manifest["source_indices"],
-        run_dir / "features" / config.trial.train_dataset,
+        feature_source(config.trial.train_dataset),
     )
     if split_manifest.get("evaluation_strategy") == "participant_nested_cv":
         collector_indices = split_manifest["collector_evaluation_indices"]
@@ -208,13 +218,13 @@ def log_dataset_inputs(
                 "collector-deployment-training-features",
                 "calibration",
                 collector_indices,
-                run_dir / "features" / "collector",
+                feature_source("collector"),
             ),
             (
                 "collector-participant-oof-evaluation-features",
                 "evaluation",
                 collector_indices,
-                run_dir / "features" / "collector",
+                feature_source("collector"),
             ),
         )
     else:
@@ -224,13 +234,13 @@ def log_dataset_inputs(
                 "collector-calibration-features",
                 "calibration",
                 split_manifest["collector_calibration_indices"],
-                run_dir / "features" / "collector",
+                feature_source("collector"),
             ),
             (
                 "collector-holdout-features",
                 "evaluation",
                 split_manifest["collector_holdout_indices"],
-                run_dir / "features" / "collector",
+                feature_source("collector"),
             ),
         )
     columns = list(DATASET_ID_COLUMNS) + feature_names

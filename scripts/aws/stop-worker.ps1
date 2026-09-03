@@ -1,5 +1,5 @@
 param(
-    [string]$StackName = "all-tmd-v1-worker",
+    [string]$StackName = "all-tmd-v2-worker",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = ""
 )

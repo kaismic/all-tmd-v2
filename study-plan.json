@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "study_id": "sydney-transfer-v2",
+  "conditions": ["nor_only", "sydney_only", "nor_plus_sydney"],
+  "sydney_fractions": [0, 0.10, 0.25, 0.50, 0.75, 1.00],
+  "seeds": [42, 43, 44],
+  "labels": {"bus": 0, "car": 1, "train": 2},
+  "snapshot_manifest": "manifests/sydney-166.json",
+  "lopo_manifest": "manifests/sydney-lopo.json",
+  "model_lock": "model-lock.json",
+  "analysis": {
+    "bootstrap_iterations": 5000,
+    "random_seed": 20260903
+  }
+}

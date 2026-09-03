@@ -5,6 +5,7 @@ from contextlib import nullcontext
 import pandas as pd
 
 from all_tmd.train import train
+from all_tmd.windowing import feature_output_dir
 
 
 def test_training_writes_required_reports(config_factory, monkeypatch):
@@ -32,8 +33,14 @@ def test_training_writes_required_reports(config_factory, monkeypatch):
         ),
     )
     run_dir = config.run_dir()
-    source_dir = run_dir / "features" / "us-tmd"
-    collector_dir = run_dir / "features" / "collector"
+    event_source = run_dir / "events" / "us-tmd"
+    event_collector = run_dir / "events" / "collector"
+    event_source.mkdir(parents=True)
+    event_collector.mkdir(parents=True)
+    pd.DataFrame({"x": [1]}).to_parquet(event_source / "part-000000.parquet")
+    pd.DataFrame({"x": [1]}).to_parquet(event_collector / "part-000000.parquet")
+    source_dir = feature_output_dir(config, "us-tmd")
+    collector_dir = feature_output_dir(config, "collector")
     source_dir.mkdir(parents=True)
     collector_dir.mkdir(parents=True)
 
@@ -109,8 +116,14 @@ def test_nested_participant_training_reports_unseen_participant_and_session_metr
         selection_metric="minimum_class_recall",
     )
     run_dir = config.run_dir()
-    source_dir = run_dir / "features" / "us-tmd"
-    collector_dir = run_dir / "features" / "collector"
+    event_source = run_dir / "events" / "us-tmd"
+    event_collector = run_dir / "events" / "collector"
+    event_source.mkdir(parents=True)
+    event_collector.mkdir(parents=True)
+    pd.DataFrame({"x": [1]}).to_parquet(event_source / "part-000000.parquet")
+    pd.DataFrame({"x": [1]}).to_parquet(event_collector / "part-000000.parquet")
+    source_dir = feature_output_dir(config, "us-tmd")
+    collector_dir = feature_output_dir(config, "collector")
     source_dir.mkdir(parents=True)
     collector_dir.mkdir(parents=True)
 

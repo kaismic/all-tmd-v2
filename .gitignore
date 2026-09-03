@@ -8,4 +8,10 @@ __pycache__/
 *.py[cod]
 data/
 all-tmd-work/
+all-tmd-v2-work/
+all-tmd-v2-results/
+all-tmd-v2-mlflow/
+model-lock.json
+manifests/sydney-lopo.json
+report-artifacts/
 aws-results/

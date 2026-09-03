@@ -18,10 +18,12 @@ sources:
       - "**/*.json.gz"
 
 dataset:
-  work_dir: /data/all-tmd-work
+  work_dir: /data/all-tmd-v2-work
   minimum_trip_seconds: 30
-  maximum_trip_seconds: 28800
+  maximum_trip_seconds: 7200
   collector_max_sample_interval_ms: 500
+  input_manifest_digest: "8931f5b287838320e9173639d4023da19f34271b6b8abdfdc63691102674124c"
+  snapshot_manifest: /app/manifests/sydney-166.json
 
 collector_minimum_sampling_rate: # hz
   accelerometer: 30
@@ -36,6 +38,6 @@ training:
 
 mlflow:
   enabled: true
-  experiment_name: ALL-TMD
+  experiment_name: ALL-TMD-V2 Sydney Transfer
   tracking_uri: null
   artifact_location: null

@@ -40,6 +40,8 @@ class DatasetConfig:
     minimum_trip_seconds: int
     maximum_trip_seconds: int
     collector_max_sample_interval_ms: int | None
+    input_manifest_digest: str
+    snapshot_manifest: Path | None
 
 
 @dataclass(frozen=True)
@@ -263,6 +265,12 @@ class PipelineConfig:
                 minimum_trip_seconds=int(dataset["minimum_trip_seconds"]),
                 maximum_trip_seconds=int(dataset.get("maximum_trip_seconds", 28_800)),
                 collector_max_sample_interval_ms=collector_max_sample_interval_ms,
+                input_manifest_digest=str(dataset.get("input_manifest_digest", "unversioned")),
+                snapshot_manifest=(
+                    None
+                    if dataset.get("snapshot_manifest") is None
+                    else _path(dataset["snapshot_manifest"], "dataset.snapshot_manifest")
+                ),
             ),
             collector_minimum_sampling_rate=rates,
             training=GlobalTrainingConfig(
@@ -285,8 +293,43 @@ class PipelineConfig:
         )
 
     @property
+    def ingestion_hash_input(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "adapter_schema_version": 1,
+            "train_dataset": self.trial.train_dataset,
+            "labels": self.trial.labels,
+            "input_manifest_digest": self.dataset.input_manifest_digest,
+            "minimum_trip_seconds": self.dataset.minimum_trip_seconds,
+            "maximum_trip_seconds": self.dataset.maximum_trip_seconds,
+        }
+
+    @property
+    def ingestion_hash(self) -> str:
+        return _canonical_hash(self.ingestion_hash_input)
+
+    @property
+    def feature_hash_input(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "feature_schema_version": 3,
+            "ingestion_hash": self.ingestion_hash,
+            "features": self.trial.raw["features"],
+            "collector_max_sample_interval_ms": self.dataset.collector_max_sample_interval_ms,
+            "collector_minimum_sampling_rate": {
+                sensor: self.collector_minimum_sampling_rate[sensor]
+                for sensor in sorted(self.trial.features.sensors)
+            },
+        }
+
+    @property
+    def feature_hash(self) -> str:
+        return _canonical_hash(self.feature_hash_input)
+
+    @property
     def config_hash(self) -> str:
-        return self.trial.config_hash
+        """Compatibility alias for the immutable ingestion-cache identity."""
+        return self.ingestion_hash
 
     @property
     def trial_hash(self) -> str:
@@ -295,27 +338,22 @@ class PipelineConfig:
     def run_dir(self) -> Path:
         run_dir = self.dataset.work_dir / self.config_hash
         run_dir.mkdir(parents=True, exist_ok=True)
-        trial_path = run_dir / "trial.json"
+        manifest_path = run_dir / "cache-manifest.json"
+        manifest = {
+            "schema_version": 1,
+            "ingestion_hash": self.ingestion_hash,
+            "ingestion_hash_input": self.ingestion_hash_input,
+        }
         canonical = json.dumps(
-            self.trial.raw,
+            manifest,
             sort_keys=True,
             indent=2,
             ensure_ascii=True,
         ) + "\n"
-        if trial_path.exists():
-            saved_canonical = trial_path.read_text(encoding="utf-8")
-            saved_trial = json.loads(saved_canonical)
-            saved_hash_input = {
-                key: value
-                for key, value in saved_trial.items()
-                if key not in (TRIAL_DISPLAY_FIELDS | {"training"})
-            }
-            if saved_hash_input != self.trial.config_hash_input:
-                raise ValueError(f"Trial hash collision at {trial_path}")
-        else:
-            saved_canonical = None
-        if saved_canonical != canonical:
-            trial_path.write_text(canonical, encoding="utf-8")
+        if manifest_path.exists() and manifest_path.read_text(encoding="utf-8") != canonical:
+            raise ValueError(f"Immutable cache manifest collision at {manifest_path}")
+        if not manifest_path.exists():
+            manifest_path.write_text(canonical, encoding="utf-8")
         return run_dir
 
     def report_dir(self) -> Path:
@@ -546,3 +584,10 @@ def _calibration_fractions(
             )
         fractions[label] = fraction
     return fractions
+
+
+def _canonical_hash(value: Any) -> str:
+    canonical = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

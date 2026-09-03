@@ -144,8 +144,9 @@ def test_features_are_incremental_per_source(config_factory, monkeypatch):
         collector_dir / "part-000001.parquet",
         index=False,
     )
-    build_features(config)
-    assert len(list(outputs["collector"].glob("part-*.parquet"))) == 2
+    rebuilt = build_features(config)
+    assert rebuilt["collector"] != outputs["collector"]
+    assert len(list(rebuilt["collector"].glob("part-*.parquet"))) == 2
     expected_progress = (
         "Feature event session scan starting",
         "Feature event part starting",
@@ -216,10 +217,12 @@ def test_collector_policy_change_rebuilds_only_collector(config_factory):
     collector_sentinel.write_text("", encoding="utf-8")
 
     changed_config = config_factory(collector_max_sample_interval_ms=600)
-    build_features(changed_config)
+    changed_outputs = build_features(changed_config)
 
     assert source_sentinel.exists()
-    assert not collector_sentinel.exists()
+    assert collector_sentinel.exists()
+    assert changed_outputs["us-tmd"] == outputs["us-tmd"]
+    assert changed_outputs["collector"] != outputs["collector"]
 
 
 def test_corrupt_feature_policy_rebuilds_affected_source(config_factory):

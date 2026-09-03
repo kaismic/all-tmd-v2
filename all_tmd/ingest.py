@@ -10,6 +10,7 @@ import re
 import shutil
 import time
 from typing import Any, ClassVar, Iterable, Iterator
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -157,31 +158,52 @@ def ingest_training_dataset(config: PipelineConfig) -> Path:
     if output_dir.exists():
         progress(f"Removing incomplete training event dataset: {output_dir}")
         _remove_incomplete_dataset(output_dir)
-    output_dir.mkdir(parents=True)
+    temp_dir = output_dir.with_name(f".{output_dir.name}.building-{uuid4().hex}")
+    temp_dir.mkdir(parents=True)
 
-    rows = 0
-    parts = 0
-    for frame in adapter.normalized_frames(config.trial.labels):
-        if frame.empty:
-            continue
-        part_path = output_dir / f"part-{parts:06d}.parquet"
-        frame.to_parquet(part_path, index=False)
-        rows += len(frame)
-        parts += 1
+    try:
+        rows = 0
+        parts = 0
+        for frame in adapter.normalized_frames(config.trial.labels):
+            if frame.empty:
+                continue
+            part_path = temp_dir / f"part-{parts:06d}.parquet"
+            frame.to_parquet(part_path, index=False)
+            rows += len(frame)
+            parts += 1
+            progress(
+                f"Training ingest progress: dataset={adapter.dataset_name}, "
+                f"rows={rows:,}, parts={parts:,}"
+            )
+        if parts == 0:
+            raise ValueError(
+                f"{adapter.dataset_name} ingestion produced no rows for configured labels"
+            )
+        (temp_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "adapter": adapter.dataset_name,
+                    "adapter_schema_version": 1,
+                    "ingestion_hash": config.ingestion_hash,
+                    "rows": rows,
+                    "parts": parts,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (temp_dir / "_SUCCESS").write_text("", encoding="utf-8")
+        temp_dir.replace(output_dir)
         progress(
-            f"Training ingest progress: dataset={adapter.dataset_name}, "
-            f"rows={rows:,}, parts={parts:,}"
+            f"Training ingest complete: dataset={adapter.dataset_name}, "
+            f"rows={rows:,}, parts={parts:,}, output={output_dir}"
         )
-    if parts == 0:
-        raise ValueError(
-            f"{adapter.dataset_name} ingestion produced no rows for configured labels"
-        )
-    success_path.write_text("", encoding="utf-8")
-    progress(
-        f"Training ingest complete: dataset={adapter.dataset_name}, "
-        f"rows={rows:,}, parts={parts:,}, output={output_dir}"
-    )
-    return output_dir
+        return output_dir
+    finally:
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
 
 
 def _remove_incomplete_dataset(path: Path) -> None:
@@ -208,6 +230,8 @@ def _remove_incomplete_dataset(path: Path) -> None:
 
 
 def ingest_collector(config: PipelineConfig) -> Path:
+    if config.dataset.snapshot_manifest is not None:
+        return _ingest_frozen_collector(config)
     output_dir = config.run_dir() / "events" / "collector"
     output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = output_dir / COLLECTOR_CHECKPOINT
@@ -271,6 +295,74 @@ def ingest_collector(config: PipelineConfig) -> Path:
         f"duration_filtered_files={duration_filtered_files:,}, output={output_dir}"
     )
     return output_dir
+
+
+def _ingest_frozen_collector(config: PipelineConfig) -> Path:
+    from all_tmd.study import verify_snapshot, verify_snapshot_files
+
+    manifest_path = config.dataset.snapshot_manifest
+    assert manifest_path is not None
+    summary = verify_snapshot_files(manifest_path, config.sources.collector.input_path)
+    eligible = set(summary["eligible_session_ids"])
+    output_dir = config.run_dir() / "events" / "collector"
+    if (output_dir / "_SUCCESS").exists():
+        progress(f"Frozen collector events already complete: {output_dir}")
+        return output_dir
+    if output_dir.exists():
+        _remove_incomplete_dataset(output_dir)
+    temp_dir = output_dir.with_name(f".{output_dir.name}.building-{uuid4().hex}")
+    temp_dir.mkdir(parents=True)
+    try:
+        source = config.sources.collector
+        files = [
+            path
+            for path in _collector_session_files(source.input_path, source.include_globs)
+            if path.name.removesuffix(".gz").removesuffix(".json") in eligible
+        ]
+        written: set[str] = set()
+        duration_filtered: set[str] = set()
+        rows = 0
+        for part, path in enumerate(files):
+            frame = normalize_collector_payload(path, config.trial.labels)
+            if frame.empty:
+                continue
+            normalized_ids = set(frame["session_id"].astype(str))
+            frame = _duration_filter(frame, config)
+            if frame.empty:
+                duration_filtered.update(normalized_ids)
+                continue
+            session_ids = set(frame["session_id"].astype(str))
+            if not session_ids.issubset(eligible):
+                raise ValueError(f"collector payload is outside the frozen snapshot: {path}")
+            frame.to_parquet(temp_dir / f"part-{part:06d}.parquet", index=False)
+            written.update(session_ids)
+            rows += len(frame)
+        missing = eligible - written - duration_filtered
+        if missing:
+            raise ValueError(
+                f"{len(missing)} frozen Sydney sessions produced no eligible events: {sorted(missing)[:5]}"
+            )
+        (temp_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "snapshot_digest": summary["snapshot_digest"],
+                    "session_count": len(written),
+                    "duration_filtered_session_count": len(duration_filtered),
+                    "rows": rows,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (temp_dir / "_SUCCESS").write_text("", encoding="utf-8")
+        temp_dir.replace(output_dir)
+        progress(f"Frozen collector ingest complete: sessions={len(written)}, rows={rows:,}")
+        return output_dir
+    finally:
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
 
 
 def normalize_us_frame(

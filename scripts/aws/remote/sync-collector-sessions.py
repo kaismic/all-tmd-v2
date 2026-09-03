@@ -53,6 +53,14 @@ def parse_args() -> argparse.Namespace:
         "--run-id",
         help="AWS run ID to record in --snapshot-path.",
     )
+    parser.add_argument(
+        "--required-manifest",
+        type=Path,
+        help=(
+            "Frozen session manifest. When set, query the complete index and "
+            "download only its listed sessions."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -220,7 +228,9 @@ def snapshot_session(item: dict[str, Any]) -> dict[str, Any]:
     return session
 
 
-def collector_snapshot_sessions(output_dir: Path) -> list[dict[str, Any]]:
+def collector_snapshot_sessions(
+    output_dir: Path, required_ids: set[str] | None = None
+) -> list[dict[str, Any]]:
     sessions_by_id: dict[str, dict[str, Any]] = {}
     for metadata_path in sorted(output_dir.rglob("*.metadata.json")):
         item = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -239,6 +249,8 @@ def collector_snapshot_sessions(output_dir: Path) -> list[dict[str, Any]]:
             )
         if session_id in sessions_by_id:
             raise ValueError(f"Duplicate collector snapshot session_id: {session_id}")
+        if required_ids is not None and session_id not in required_ids:
+            continue
         sessions_by_id[session_id] = snapshot_session(item)
     return [sessions_by_id[session_id] for session_id in sorted(sessions_by_id)]
 
@@ -250,8 +262,9 @@ def write_collector_snapshot(
     bucket: str,
     table: str,
     output_dir: Path,
+    required_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    sessions = collector_snapshot_sessions(output_dir)
+    sessions = collector_snapshot_sessions(output_dir, required_ids)
     session_ids = [str(session["session_id"]) for session in sessions]
     checkpoint_path = output_dir / ".download_checkpoint.json"
     last_sync_key = read_checkpoint(checkpoint_path, bucket, table)
@@ -301,12 +314,54 @@ def download_session(bucket: str, output_dir: Path, item: dict[str, Any]) -> boo
     return downloaded
 
 
-def sync(bucket: str, table: str, output_dir: Path) -> dict[str, int]:
+def required_session_ids(path: Path) -> set[str]:
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    sessions = manifest.get("sessions")
+    if not isinstance(sessions, list):
+        raise ValueError(f"Frozen collector manifest has no sessions array: {path}")
+    identifiers = {
+        str(session.get("session_id", ""))
+        for session in sessions
+        if isinstance(session, dict)
+    }
+    if "" in identifiers or len(identifiers) != len(sessions):
+        raise ValueError(f"Frozen collector manifest has missing or duplicate IDs: {path}")
+    return identifiers
+
+
+def _local_session_ids(output_dir: Path) -> set[str]:
+    identifiers: set[str] = set()
+    for metadata_path in output_dir.rglob("*.metadata.json"):
+        item = json.loads(metadata_path.read_text(encoding="utf-8"))
+        session_id = item.get("session_id") if isinstance(item, dict) else None
+        if isinstance(session_id, str) and session_id:
+            identifiers.add(session_id)
+    return identifiers
+
+
+def sync(
+    bucket: str,
+    table: str,
+    output_dir: Path,
+    required_ids: set[str] | None = None,
+) -> dict[str, int]:
     output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = output_dir / ".download_checkpoint.json"
-    last_sync_key = read_checkpoint(checkpoint_path, bucket, table)
+    # A frozen snapshot may contain objects older than the incremental
+    # checkpoint, so it must query the complete index.
+    last_sync_key = "" if required_ids is not None else read_checkpoint(
+        checkpoint_path, bucket, table
+    )
     discovered = query_sessions(table, last_sync_key)
-    eligible = [item for item in discovered if is_eligible(item)]
+    eligible = [
+        item
+        for item in discovered
+        if is_eligible(item)
+        and (
+            required_ids is None
+            or str(item.get("session_id", "")) in required_ids
+        )
+    ]
     downloaded_count = sum(
         download_session(bucket, output_dir, item) for item in eligible
     )
@@ -321,6 +376,13 @@ def sync(bucket: str, table: str, output_dir: Path) -> dict[str, int]:
                 "source_index": INDEX_NAME,
             },
         )
+    if required_ids is not None:
+        missing = sorted(required_ids - _local_session_ids(output_dir))
+        if missing:
+            raise FileNotFoundError(
+                f"{len(missing)} frozen collector sessions are unavailable; "
+                f"first missing IDs: {missing[:5]}"
+            )
     return {
         "discovered_count": len(discovered),
         "eligible_count": len(eligible),
@@ -332,7 +394,12 @@ def main() -> None:
     args = parse_args()
     if bool(args.snapshot_path) != bool(args.run_id):
         raise ValueError("--snapshot-path and --run-id must be provided together")
-    result = sync(args.bucket, args.table, args.output_dir)
+    required_ids = (
+        required_session_ids(args.required_manifest)
+        if args.required_manifest is not None
+        else None
+    )
+    result = sync(args.bucket, args.table, args.output_dir, required_ids)
     if args.snapshot_path:
         snapshot = write_collector_snapshot(
             args.snapshot_path,
@@ -340,6 +407,7 @@ def main() -> None:
             bucket=args.bucket,
             table=args.table,
             output_dir=args.output_dir,
+            required_ids=required_ids,
         )
         result["snapshot_session_count"] = snapshot["session_count"]
     print(json.dumps(result, separators=(",", ":")), flush=True)

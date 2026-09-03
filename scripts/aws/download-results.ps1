@@ -3,7 +3,7 @@ param(
     [string]$RunId,
     [Parameter(Mandatory = $true)]
     [string]$Destination,
-    [string]$StackName = "all-tmd-v1-worker",
+    [string]$StackName = "all-tmd-v2-worker",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = ""
 )
@@ -19,7 +19,7 @@ $destinationPath = [System.IO.Path]::GetFullPath($Destination)
 New-Item -ItemType Directory -Path $destinationPath -Force | Out-Null
 Invoke-AllTmdAws -Arguments @(
     "s3", "sync",
-    "s3://$($outputs.BucketName)/all-tmd-v1/results/$RunId/",
+    "s3://$($outputs.BucketName)/all-tmd-v2/results/$RunId/",
     $destinationPath,
     "--only-show-errors"
 ) -AllowEmpty

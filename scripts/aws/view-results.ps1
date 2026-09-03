@@ -16,8 +16,8 @@ Set-StrictMode -Version Latest
 
 $image = "ghcr.io/mlflow/mlflow:v3.14.0"
 $containerName = "all-tmd-mlflow-viewer-$LocalPort"
-$viewerLabel = "all-tmd-v1.mlflow-viewer"
-$runIdLabel = "all-tmd-v1.run-id"
+$viewerLabel = "all-tmd-v2.mlflow-viewer"
+$runIdLabel = "all-tmd-v2.run-id"
 $url = "http://127.0.0.1:$LocalPort"
 
 function Assert-DockerAvailable {

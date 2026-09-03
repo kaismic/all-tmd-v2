@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$RunId,
-    [string]$StackName = "all-tmd-v1-worker",
+    [string]$StackName = "all-tmd-v2-worker",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = "",
     [int]$LogLines = 80
@@ -30,7 +30,7 @@ if ($state -eq "running") {
     Wait-AllTmdSsmCommand -CommandId $commandId -InstanceId $instanceId | Out-Null
 }
 else {
-    $summaryUri = "s3://$($outputs.BucketName)/all-tmd-v1/results/$RunId/run/run-summary.json"
+    $summaryUri = "s3://$($outputs.BucketName)/all-tmd-v2/results/$RunId/run/run-summary.json"
     Write-Host "Worker is not running; reading the uploaded summary."
     Invoke-AllTmdAws -Arguments @("s3", "cp", $summaryUri, "-") -AllowEmpty
 }

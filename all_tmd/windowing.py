@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 import shutil
 import time
 from typing import Any
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -38,8 +40,55 @@ def build_features(config: PipelineConfig) -> dict[str, Path]:
     source = config.trial.train_dataset
     return {
         source: _build_source_features(config, source, incremental=False),
-        "collector": _build_source_features(config, "collector", incremental=True),
+        "collector": _build_source_features(
+            config,
+            "collector",
+            incremental=config.dataset.snapshot_manifest is None,
+        ),
     }
+
+
+def feature_output_dir(config: PipelineConfig, source_name: str) -> Path:
+    event_dir = config.run_dir() / "events" / source_name
+    artifact_digest = _event_artifact_digest(event_dir)
+    identity = {
+        "schema_version": FEATURE_POLICY_SCHEMA_VERSION,
+        "source_name": source_name,
+        "event_artifact_digest": artifact_digest,
+        "features": config.trial.raw["features"],
+        "minimum_trip_seconds": config.dataset.minimum_trip_seconds,
+        "maximum_trip_seconds": config.dataset.maximum_trip_seconds,
+    }
+    if source_name == "collector":
+        identity["collector_sampling_quality"] = {
+            "collector_minimum_sampling_rate": {
+                sensor: config.collector_minimum_sampling_rate[sensor]
+                for sensor in sorted(config.trial.features.sensors)
+            },
+            "collector_max_sample_interval_ms": (
+                config.dataset.collector_max_sample_interval_ms
+            ),
+        }
+    encoded = json.dumps(
+        identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    cache_key = hashlib.sha256(encoded).hexdigest()
+    return config.run_dir() / "features" / cache_key / source_name
+
+
+def _event_artifact_digest(event_dir: Path) -> str:
+    if not event_dir.exists():
+        raise FileNotFoundError(f"Run ingestion before features: {event_dir}")
+    digest = hashlib.sha256()
+    parts = sorted(event_dir.glob("part-*.parquet"))
+    if not parts:
+        raise FileNotFoundError(f"Run ingestion before features: {event_dir}")
+    for path in parts:
+        digest.update(path.name.encode("utf-8"))
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
 
 
 def _build_source_features(
@@ -56,23 +105,32 @@ def _build_source_features(
         raise RuntimeError(
             f"Training event dataset is incomplete (missing _SUCCESS): {event_dir}"
         )
-    output_dir = run_dir / "features" / source_name
+    final_output_dir = feature_output_dir(config, source_name)
     expected_policy = _feature_policy(config, source_name)
-    if output_dir.exists() and not _feature_policy_matches(
-        output_dir / FEATURE_POLICY,
+    if final_output_dir.exists() and not _feature_policy_matches(
+        final_output_dir / FEATURE_POLICY,
         expected_policy,
     ):
-        progress(f"Rebuilding features for changed policy: {output_dir}")
-        shutil.rmtree(output_dir)
+        progress(f"Rebuilding incomplete/corrupt feature cache: {final_output_dir}")
+        shutil.rmtree(final_output_dir)
+    success_path = final_output_dir / "_SUCCESS"
+    if not incremental and success_path.exists():
+        progress(f"Training features already complete: {final_output_dir}")
+        return final_output_dir
+    if not incremental and final_output_dir.exists():
+        progress(f"Removing incomplete training feature dataset: {final_output_dir}")
+        shutil.rmtree(final_output_dir)
+    building_dir: Path | None = None
+    if incremental:
+        output_dir = final_output_dir
+    else:
+        building_dir = final_output_dir.with_name(
+            f".{source_name}.building-{uuid4().hex}"
+        )
+        output_dir = building_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
     success_path = output_dir / "_SUCCESS"
     checkpoint_path = output_dir / FEATURE_CHECKPOINT
-    if not incremental and success_path.exists():
-        progress(f"Training features already complete: {output_dir}")
-        return output_dir
-    if not incremental and output_dir.exists():
-        progress(f"Removing incomplete training feature dataset: {output_dir}")
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
     _write_feature_policy(output_dir / FEATURE_POLICY, expected_policy)
 
     processed = _read_checkpoint(checkpoint_path) if incremental else set()
@@ -149,14 +207,18 @@ def _build_source_features(
             raise ValueError(f"No feature rows produced for {source_name}")
         if not incremental:
             success_path.write_text("", encoding="utf-8")
+            final_output_dir.parent.mkdir(parents=True, exist_ok=True)
+            output_dir.replace(final_output_dir)
         progress(
             f"Feature extraction complete: source={source_name}, "
-            f"new_rows={total_rows:,}, sessions={len(completed_ids):,}, output={output_dir}"
+            f"new_rows={total_rows:,}, sessions={len(completed_ids):,}, output={final_output_dir}"
         )
-        return output_dir
+        return final_output_dir
     finally:
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
+        if building_dir is not None and building_dir.exists():
+            shutil.rmtree(building_dir)
 
 
 def feature_frame(
@@ -386,7 +448,11 @@ def _feature_policy(
     policy: dict[str, Any] = {
         "schema_version": FEATURE_POLICY_SCHEMA_VERSION,
         "source_name": source_name,
-        "trial_config_hash": config.config_hash,
+        "ingestion_hash": config.ingestion_hash,
+        "features": config.trial.raw["features"],
+        "event_artifact_digest": _event_artifact_digest(
+            config.run_dir() / "events" / source_name
+        ),
         "minimum_trip_seconds": config.dataset.minimum_trip_seconds,
         "maximum_trip_seconds": config.dataset.maximum_trip_seconds,
     }

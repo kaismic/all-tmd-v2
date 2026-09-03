@@ -96,6 +96,50 @@ def test_existing_checkpoint_limits_next_query(tmp_path, monkeypatch):
     assert result["downloaded_count"] == 0
 
 
+def test_frozen_manifest_queries_all_and_downloads_only_required_sessions(
+    tmp_path, monkeypatch
+):
+    output_dir = tmp_path / "downloaded_sessions"
+    sessions = [
+        {
+            "participant_id": "participant_001",
+            "session_id": session_id,
+            "s3_key": f"raw/participant_001/{session_id}.json.gz",
+            "sync_key": f"0001#{session_id}",
+        }
+        for session_id in ("required", "later-upload")
+    ]
+    queried_after = []
+
+    def fake_query(table, after_sync_key):
+        queried_after.append(after_sync_key)
+        return sessions
+
+    def fake_download(bucket, destination, item):
+        payload = collector_cloud_sync.destination_for(destination, item["s3_key"])
+        payload.parent.mkdir(parents=True, exist_ok=True)
+        payload.write_bytes(b"payload")
+        payload.with_suffix(f"{payload.suffix}.metadata.json").write_text(
+            json.dumps(item), encoding="utf-8"
+        )
+        return True
+
+    monkeypatch.setattr(collector_cloud_sync, "query_sessions", fake_query)
+    monkeypatch.setattr(collector_cloud_sync, "download_session", fake_download)
+
+    result = collector_cloud_sync.sync(
+        "collector-bucket",
+        "TransportSessions",
+        output_dir,
+        {"required"},
+    )
+
+    assert queried_after == [""]
+    assert result["eligible_count"] == 1
+    assert result["downloaded_count"] == 1
+    assert not any(output_dir.rglob("later-upload.json.gz"))
+
+
 def test_eligibility_rejects_test_participants_and_mismatched_keys():
     assert collector_cloud_sync.is_eligible(
         {

@@ -2,8 +2,8 @@
 
 set -Eeuo pipefail
 
-state_dir=/etc/all-tmd-v1
-install_dir=/usr/local/lib/all-tmd-v1
+state_dir=/etc/all-tmd-v2
+install_dir=/usr/local/lib/all-tmd-v2
 service_name=all-tmd-trials.service
 data_dir=/mnt/all-tmd-data
 
@@ -139,7 +139,7 @@ manage_mlflow_server() {
         printf '%s\n' "Active run manifest has an invalid Git commit." >&2
         return 1
     }
-    local checkout="/opt/all-tmd-v1/checkouts/$git_commit"
+    local checkout="/opt/all-tmd-v2/checkouts/$git_commit"
     [[ -f $checkout/docker-compose.yml && -f $checkout/.env ]] || {
         printf '%s\n' "Active run checkout is not ready for MLflow." >&2
         return 1
@@ -172,8 +172,8 @@ execute_run() {
 
     # These must outlive execute_run because the EXIT trap runs after the
     # function has unwound on an early failure.
-    config_prefix="s3://$ALL_TMD_AWS_BUCKET/all-tmd-v1/config/$ALL_TMD_RUN_ID"
-    result_prefix="s3://$ALL_TMD_AWS_BUCKET/all-tmd-v1/results/$ALL_TMD_RUN_ID"
+    config_prefix="s3://$ALL_TMD_AWS_BUCKET/all-tmd-v2/config/$ALL_TMD_RUN_ID"
+    result_prefix="s3://$ALL_TMD_AWS_BUCKET/all-tmd-v2/results/$ALL_TMD_RUN_ID"
     run_state_dir="$data_dir/cloud-runs/$ALL_TMD_RUN_ID"
     bundle_dir="$run_state_dir/config"
     log_path="$run_state_dir/run.log"
@@ -191,7 +191,7 @@ execute_run() {
         local end_epoch
         local manifest_commit=unknown
         local manifest_mode=unknown
-        local trial_count=0
+        local expected_parent_runs=0
         set +e
         trap - EXIT
         if ((final_status == 1 && trapped_status != 0)); then
@@ -201,7 +201,7 @@ execute_run() {
         if [[ -f $bundle_dir/run-manifest.json ]]; then
             manifest_commit=$(jq -r '.git_commit // "unknown"' "$bundle_dir/run-manifest.json")
             manifest_mode=$(jq -r '.mode // "unknown"' "$bundle_dir/run-manifest.json")
-            trial_count=$(jq -r '.trial_count // 0' "$bundle_dir/run-manifest.json")
+            expected_parent_runs=$(jq -r '.expected_parent_runs // 0' "$bundle_dir/run-manifest.json")
         fi
         if [[ -n $checkout && -f $checkout/docker-compose.yml ]]; then
             (cd "$checkout" && docker compose --profile mlflow down) || true
@@ -210,7 +210,7 @@ execute_run() {
             --arg run_id "$ALL_TMD_RUN_ID" \
             --arg git_commit "$manifest_commit" \
             --arg mode "$manifest_mode" \
-            --argjson trial_count "$trial_count" \
+            --argjson expected_parent_runs "$expected_parent_runs" \
             --argjson exit_code "$final_status" \
             --arg started_at "$(date --date="@$start_epoch" --iso-8601=seconds)" \
             --arg completed_at "$(date --date="@$end_epoch" --iso-8601=seconds)" \
@@ -218,46 +218,15 @@ execute_run() {
             --argjson logical_processors "$(nproc)" \
             --argjson memory_mib "$(awk '/MemTotal/ {print int($2 / 1024)}' /proc/meminfo)" \
             '{schema_version: 1, run_id: $run_id, git_commit: $git_commit,
-              mode: $mode, trial_count: $trial_count, exit_code: $exit_code,
+              mode: $mode, expected_parent_runs: $expected_parent_runs, exit_code: $exit_code,
               started_at: $started_at, completed_at: $completed_at,
               duration_seconds: $duration_seconds,
               logical_processors: $logical_processors, memory_mib: $memory_mib}' \
             >"$run_state_dir/run-summary.json"
 
-        if [[ -n $checkout && -f $checkout/trials.json ]]; then
-            while IFS= read -r config_hash; do
-                local work_dir="$data_dir/all-tmd-work/$config_hash"
-                if [[ -d $work_dir/reports ]]; then
-                    aws s3 sync "$work_dir/reports" \
-                        "$result_prefix/work/$config_hash/reports" --only-show-errors
-                fi
-                if [[ -d $work_dir/splits ]]; then
-                    aws s3 sync "$work_dir/splits" \
-                        "$result_prefix/work/$config_hash/splits" --only-show-errors
-                fi
-                if [[ -f $work_dir/trial.json ]]; then
-                    aws s3 cp "$work_dir/trial.json" \
-                        "$result_prefix/work/$config_hash/trial.json" --only-show-errors
-                fi
-            done < <(python3 - "$checkout/trials.json" <<'PY'
-import hashlib
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as stream:
-    trials = json.load(stream)
-for trial in trials:
-    relevant = {
-        key: value
-        for key, value in trial.items()
-        if key not in {"run_name", "training"}
-    }
-    canonical = json.dumps(
-        relevant, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    )
-    print(hashlib.sha256(canonical.encode("utf-8")).hexdigest())
-PY
-            )
+        if [[ -d $run_state_dir/results ]]; then
+            aws s3 sync "$run_state_dir/results" \
+                "$result_prefix/results" --only-show-errors || true
         fi
         if [[ -d $run_state_dir/mlflow ]]; then
             aws s3 sync "$run_state_dir/mlflow" \
@@ -290,9 +259,9 @@ PY
     aws s3 sync "$config_prefix" "$bundle_dir" --only-show-errors
     local manifest="$bundle_dir/run-manifest.json"
     [[ -f $manifest ]]
-    [[ $(jq -r .schema_version "$manifest") == 1 ]]
+    [[ $(jq -r .schema_version "$manifest") == 2 ]]
     [[ $(jq -r .run_id "$manifest") == "$ALL_TMD_RUN_ID" ]]
-    for name in model.config.yaml trial-parameters.json trials.json; do
+    while IFS= read -r name; do
         local expected
         local actual
         expected=$(jq -r --arg name "$name" '.config_sha256[$name]' "$manifest")
@@ -301,14 +270,14 @@ PY
             printf 'Checksum mismatch for %s.\n' "$name" >&2
             return 1
         }
-    done
+    done < <(jq -r '.config_sha256 | keys[]' "$manifest")
 
     local git_repository
     local git_commit
     git_repository=$(jq -r .git_repository "$manifest")
     git_commit=$(jq -r .git_commit "$manifest")
     [[ $git_commit =~ ^[0-9a-f]{40}$ ]]
-    checkout="/opt/all-tmd-v1/checkouts/$git_commit"
+    checkout="/opt/all-tmd-v2/checkouts/$git_commit"
     if [[ ! -d $checkout/.git ]]; then
         mkdir -p "$(dirname "$checkout")"
         git clone --no-checkout "$git_repository" "$checkout"
@@ -316,28 +285,34 @@ PY
     git -C "$checkout" fetch --depth 1 origin "$git_commit"
     git -C "$checkout" checkout --detach --force "$git_commit"
     install -m 0644 "$bundle_dir/model.config.yaml" "$checkout/model.config.yaml"
-    install -m 0644 "$bundle_dir/trial-parameters.json" \
-        "$checkout/trial-parameters.json"
-    install -m 0644 "$bundle_dir/trials.json" "$checkout/trials.json"
+    install -m 0644 "$bundle_dir/study-plan.json" "$checkout/study-plan.json"
+    install -m 0644 "$bundle_dir/study-trial.json" "$checkout/study-trial.json"
+    rm -rf "$checkout/manifests"
+    cp -R "$bundle_dir/manifests" "$checkout/manifests"
+    if [[ -f $bundle_dir/model-lock.json ]]; then
+        install -m 0644 "$bundle_dir/model-lock.json" "$checkout/model-lock.json"
+    fi
 
     mkdir -p \
         "$data_dir/nor-tmd-data" \
         "$data_dir/us-tmd-data" \
         "$data_dir/downloaded_sessions" \
-        "$data_dir/all-tmd-work" \
-        "$run_state_dir/mlflow/mlartifacts"
+        "$data_dir/all-tmd-v2-work" \
+        "$run_state_dir/mlflow/mlartifacts" \
+        "$run_state_dir/results"
     for source in nor-tmd-data us-tmd-data downloaded_sessions; do
         if [[ $source == downloaded_sessions ]]; then
             continue
         fi
         aws s3 sync \
-            "s3://$ALL_TMD_AWS_BUCKET/all-tmd-v1/inputs/$source" \
+            "s3://$ALL_TMD_AWS_BUCKET/all-tmd-v2/inputs/$source" \
             "$data_dir/$source" --only-show-errors
     done
     python3 "$bundle_dir/sync-collector-sessions.py" \
         --bucket "$(jq -r .collector_sessions.bucket "$manifest")" \
         --table "$(jq -r .collector_sessions.table "$manifest")" \
         --output-dir "$data_dir/downloaded_sessions" \
+        --required-manifest "$bundle_dir/manifests/sydney-166.json" \
         --snapshot-path "$run_state_dir/collector-snapshot.json" \
         --run-id "$ALL_TMD_RUN_ID"
 
@@ -377,6 +352,7 @@ PY
             'sqlite:////mlflow-data/mlflow.db'
         printf 'MLFLOW_ARTIFACTS_DESTINATION=%s\n' \
             '/mlflow-data/mlartifacts'
+        printf 'ALL_TMD_GIT_COMMIT=%s\n' "$(jq -r .git_commit "$manifest")"
         printf 'NTFY_SERVER=%s\n' "$ntfy_server"
         printf 'NTFY_TOPIC=%s\n' "$ntfy_topic"
         printf 'NTFY_TOKEN=%s\n' "$ntfy_token"
@@ -384,12 +360,30 @@ PY
     } >"$checkout/.env"
     chmod 0600 "$checkout/.env"
 
-    printf 'Starting %s All-TMD trial(s).\n' "$(jq length "$checkout/trials.json")"
+    local mode
+    mode=$(jq -r .mode "$manifest")
+    printf 'Starting ALL-TMD v2 %s study run.\n' "$mode"
     export ALL_TMD_SKIP_MLFLOW_SERVER=true
     set +e
     (
         cd "$checkout"
-        /usr/bin/time -v -o "$resource_path" bash scripts/run-trials.sh
+        docker compose build
+        docker compose run --rm study snapshot verify \
+            --input-dir /data/downloaded_sessions
+        docker compose run --rm study prepare-data
+        if [[ $mode == tune ]]; then
+            /usr/bin/time -v -o "$resource_path" docker compose run --rm study \
+                tune-source --output-root "/data/cloud-runs/$ALL_TMD_RUN_ID/results"
+        else
+            docker compose run --rm study create-lopo
+            local limit_args=()
+            if [[ $mode == smoke ]]; then
+                limit_args=(--limit 1)
+            fi
+            /usr/bin/time -v -o "$resource_path" docker compose run --rm study \
+                run-study --execution-backend aws \
+                --output-root "/data/cloud-runs/$ALL_TMD_RUN_ID/results" "${limit_args[@]}"
+        fi
     )
     final_status=$?
     set -e

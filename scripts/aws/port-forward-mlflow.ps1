@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$RunId,
-    [string]$StackName = "all-tmd-v1-worker",
+    [string]$StackName = "all-tmd-v2-worker",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = "",
     [int]$LocalPort = 5002
@@ -25,7 +25,7 @@ $parametersFile = New-TemporaryFile
 $serverStartRequested = $false
 try {
     $startCommandId = Send-AllTmdSsmCommand -InstanceId $instanceId -Commands @(
-        "/usr/local/lib/all-tmd-v1/run-trials-cloud.sh start-mlflow --run-id '$RunId'"
+        "/usr/local/lib/all-tmd-v2/run-trials-cloud.sh start-mlflow --run-id '$RunId'"
     ) -Comment "Start on-demand MLflow for All-TMD run $RunId"
     $serverStartRequested = $true
     Wait-AllTmdSsmCommand -CommandId $startCommandId -InstanceId $instanceId |
@@ -52,7 +52,7 @@ finally {
         try {
             $stopCommandId = Send-AllTmdSsmCommand -InstanceId $instanceId `
                 -Commands @(
-                    "/usr/local/lib/all-tmd-v1/run-trials-cloud.sh stop-mlflow --run-id '$RunId'"
+                    "/usr/local/lib/all-tmd-v2/run-trials-cloud.sh stop-mlflow --run-id '$RunId'"
                 ) `
                 -Comment "Stop on-demand MLflow for All-TMD run $RunId"
             Wait-AllTmdSsmCommand -CommandId $stopCommandId `

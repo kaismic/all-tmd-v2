@@ -4,7 +4,7 @@ Description: Persistent On-Demand EC2 worker for occasional All-TMD trial sweeps
 Parameters:
   ProjectName:
     Type: String
-    Default: all-tmd-v1
+    Default: all-tmd-v2
     AllowedPattern: "^[a-zA-Z0-9-]+$"
   InstanceType:
     Type: String
@@ -34,7 +34,7 @@ Parameters:
     Description: DynamoDB session table created by the collector backend.
   NtfyTokenParameterName:
     Type: String
-    Default: /all-tmd-v1/ntfy-token
+    Default: /all-tmd-v2/ntfy-token
     AllowedPattern: '^/[A-Za-z0-9_./-]+$'
   BudgetNotificationEmail:
     Type: String
@@ -208,15 +208,15 @@ Resources:
                 Condition:
                   StringLike:
                     s3:prefix:
-                      - all-tmd-v1/*
+                      - all-tmd-v2/*
               - Sid: ReadInputsAndConfiguration
                 Effect: Allow
                 Action:
                   - s3:GetObject
                   - s3:GetObjectVersion
                 Resource:
-                  - !Sub ${DataBucket.Arn}/all-tmd-v1/inputs/*
-                  - !Sub ${DataBucket.Arn}/all-tmd-v1/config/*
+                  - !Sub ${DataBucket.Arn}/all-tmd-v2/inputs/*
+                  - !Sub ${DataBucket.Arn}/all-tmd-v2/config/*
               - Sid: QueryConfirmedCollectorSessions
                 Effect: Allow
                 Action: dynamodb:Query
@@ -236,7 +236,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - s3:PutObject
-                Resource: !Sub ${DataBucket.Arn}/all-tmd-v1/results/*
+                Resource: !Sub ${DataBucket.Arn}/all-tmd-v2/results/*
               - Sid: ReadNotificationToken
                 Effect: Allow
                 Action: ssm:GetParameter
@@ -350,8 +350,8 @@ Resources:
           fi
           mount /mnt/all-tmd-data
           chown ubuntu:ubuntu /mnt/all-tmd-data
-          install -d -m 0755 /var/lib/all-tmd-v1
-          date --iso-8601=seconds >/var/lib/all-tmd-v1/bootstrap-complete
+          install -d -m 0755 /var/lib/all-tmd-v2
+          date --iso-8601=seconds >/var/lib/all-tmd-v2/bootstrap-complete
 
   DataVolumeAttachment:
     Type: AWS::EC2::VolumeAttachment

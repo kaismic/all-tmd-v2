@@ -1,0 +1,30 @@
+[
+  {
+    "run_name": "sydney-transfer-v2",
+    "train_dataset": "nor-tmd",
+    "labels": {"bus": 0, "car": 1, "train": 2},
+    "features": {
+      "default_window_seconds": 60,
+      "default_step_seconds": 30,
+      "context_windows_seconds": [60],
+      "sensors": {
+        "accelerometer": ["mean", "standard_deviation", "range", "minimum"],
+        "gyroscope": ["mean", "standard_deviation", "range", "minimum"],
+        "magnetometer": ["standard_deviation", "range", "minimum"]
+      }
+    },
+    "training": {
+      "random_seed": 42,
+      "optuna_trials": 45,
+      "model_families": ["xgboost"],
+      "calibration_fraction": 0.5,
+      "evaluation_strategy": "participant_nested_cv",
+      "participant_inner_folds": 5,
+      "weighting_strategy": "class_balanced",
+      "collector_domain_weight": 1.0,
+      "duration_balancing": "none",
+      "selection_metric": "macro_f1",
+      "bootstrap_iterations": 0
+    }
+  }
+]

@@ -1,11 +1,11 @@
 param(
-    [ValidateSet("Full", "Smoke")]
+    [ValidateSet("Full", "Smoke", "Tune")]
     [string]$Mode = "Full",
     [string]$RunId = "",
     [string]$NtfyTopic = "",
     [string]$NtfyServer = "https://ntfy.sh",
     [string]$NtfyEvents = "all-trials",
-    [string]$StackName = "all-tmd-v1-worker",
+    [string]$StackName = "all-tmd-v2-worker",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = "",
     [switch]$NoAutoStop,
@@ -22,7 +22,7 @@ if (-not $AllowDirtyWorktree) {
         -C $projectRoot status --porcelain
     if ($LASTEXITCODE -ne 0) { throw "Could not inspect the Git worktree." }
     if ($status) {
-        throw "The all-tmd-v1 worktree is dirty. Commit the run code or pass -AllowDirtyWorktree intentionally."
+        throw "The all-tmd-v2 worktree is dirty. Commit the run code or pass -AllowDirtyWorktree intentionally."
     }
 }
 $gitCommit = (& git -c "safe.directory=$($projectRoot.Replace('\', '/'))" `
@@ -78,7 +78,7 @@ try {
         -Destination $bundleDir
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "remote\sync-collector-sessions.py") `
         -Destination $bundleDir
-    $prefix = "s3://$($outputs.BucketName)/all-tmd-v1/config/$RunId/"
+    $prefix = "s3://$($outputs.BucketName)/all-tmd-v2/config/$RunId/"
     Invoke-AllTmdAws -Arguments @(
         "s3", "sync", $bundleDir, $prefix, "--only-show-errors"
     ) -AllowEmpty

@@ -17,6 +17,7 @@ from sklearn.metrics import (
 
 from all_tmd.balancing import select_training_indices, training_sample_weights
 from all_tmd.config import PipelineConfig
+from all_tmd.windowing import feature_output_dir
 from all_tmd.mlflow_utils import (
     log_artifact,
     log_confusion_matrix,
@@ -35,8 +36,8 @@ from all_tmd.splits import create_splits, write_splits
 def train(config: PipelineConfig) -> dict[str, Any]:
     run_dir = config.run_dir()
     source_name = config.trial.train_dataset
-    source_frame = _read_feature_dataset(run_dir / "features" / source_name)
-    collector_frame = _read_feature_dataset(run_dir / "features" / "collector")
+    source_frame = _read_feature_dataset(feature_output_dir(config, source_name))
+    collector_frame = _read_feature_dataset(feature_output_dir(config, "collector"))
     frame = pd.concat([source_frame, collector_frame], ignore_index=True)
     feature_names = config.trial.feature_names
     missing = sorted(set(feature_names) - set(frame.columns))

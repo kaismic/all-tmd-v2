@@ -52,7 +52,7 @@ def test_cloud_runner_syncs_collector_backend_directly():
     assert '--snapshot-path "$run_state_dir/collector-snapshot.json"' in runner
     assert '--run-id "$ALL_TMD_RUN_ID"' in runner
     assert '@("nor-tmd-data", "us-tmd-data")' in uploader
-    assert 'all-tmd-v1/inputs/$source' in uploader
+    assert 'all-tmd-v2/inputs/$source' in uploader
 
 
 def test_cloud_runner_uses_serverless_run_specific_mlflow_storage():

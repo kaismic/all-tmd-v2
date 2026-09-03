@@ -8,26 +8,51 @@ from pathlib import Path
 import pytest
 
 
-def test_hash_is_canonical_json_of_trial_without_training(config_factory):
+def test_hash_is_stage_specific_and_excludes_training(config_factory):
     config = config_factory()
     expected = hashlib.sha256(
         json.dumps(
-            {
-                key: value
-                for key, value in config.trial.raw.items()
-                if key != "training"
-            },
+            config.ingestion_hash_input,
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=True,
         ).encode("utf-8")
     ).hexdigest()
+    assert config.ingestion_hash == expected
     assert config.config_hash == expected
     changed_global_config = replace(
         config,
         dataset=replace(config.dataset, work_dir=Path("a-different-work-dir")),
     )
     assert changed_global_config.config_hash == config.config_hash
+
+
+def test_input_and_preprocessing_changes_cross_only_their_cache_boundaries(
+    config_factory,
+):
+    config = config_factory(collector_max_sample_interval_ms=500)
+    changed_training = replace(
+        config,
+        trial=replace(
+            config.trial,
+            training=replace(config.trial.training, random_seed=99),
+        ),
+    )
+    changed_quality = replace(
+        config,
+        dataset=replace(config.dataset, collector_max_sample_interval_ms=600),
+    )
+    changed_input = replace(
+        config,
+        dataset=replace(config.dataset, input_manifest_digest="different-input"),
+    )
+
+    assert changed_training.ingestion_hash == config.ingestion_hash
+    assert changed_training.feature_hash == config.feature_hash
+    assert changed_quality.ingestion_hash == config.ingestion_hash
+    assert changed_quality.feature_hash != config.feature_hash
+    assert changed_input.ingestion_hash != config.ingestion_hash
+    assert changed_input.feature_hash != config.feature_hash
 
 
 def test_training_fields_do_not_affect_hash_or_cause_collision(config_factory):
@@ -58,11 +83,11 @@ def test_training_fields_do_not_affect_hash_or_cause_collision(config_factory):
     assert changed_training.run_dir() == original_run_dir
     changed_report_dir = changed_training.report_dir()
     changed_split_path = changed_training.split_path()
-    saved_trial = json.loads(
-        (original_run_dir / "trial.json").read_text(encoding="utf-8")
+    saved_manifest = json.loads(
+        (original_run_dir / "cache-manifest.json").read_text(encoding="utf-8")
     )
-    assert saved_trial["training"]["random_seed"] == 123
-    assert saved_trial["training"]["optuna_trials"] == 25
+    assert saved_manifest["ingestion_hash"] == config.ingestion_hash
+    assert "training" not in json.dumps(saved_manifest)
     assert changed_report_dir != config.report_dir()
     assert changed_split_path != config.split_path()
 
