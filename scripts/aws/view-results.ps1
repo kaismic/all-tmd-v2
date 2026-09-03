@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$image = "ghcr.io/mlflow/mlflow:v3.14.0"
+$image = "ghcr.io/mlflow/mlflow:v3.15.2"
 $containerName = "all-tmd-mlflow-viewer-$LocalPort"
 $viewerLabel = "all-tmd-v2.mlflow-viewer"
 $runIdLabel = "all-tmd-v2.run-id"

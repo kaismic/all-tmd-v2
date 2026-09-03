@@ -92,7 +92,7 @@ def test_downloaded_results_viewer_uses_pinned_local_mlflow_server():
     viewer = (AWS_SCRIPTS / "view-results.ps1").read_text(encoding="utf-8")
 
     assert "[int]$LocalPort = 5003" in viewer
-    assert "ghcr.io/mlflow/mlflow:v3.14.0" in viewer
+    assert "ghcr.io/mlflow/mlflow:v3.15.2" in viewer
     assert '"127.0.0.1:${LocalPort}:5002"' in viewer
     assert "sqlite:////data/all-tmd-work/mlflow.db" in viewer
     assert '"--artifacts-destination", "/data/all-tmd-work/mlartifacts"' in viewer
