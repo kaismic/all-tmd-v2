@@ -92,6 +92,13 @@ NOR-TMD and US-TMD objects under `all-tmd-v1/inputs` are reused, as are their EB
 copies, so v2 has no input-upload step. Confirmed Sydney sessions are refreshed
 directly from the collector backend.
 
+For an existing shared stack, deployment pins the worker's current AMI instead
+of re-resolving Ubuntu `stable/current` onto the instance. Do not execute a
+change set that reports replacement of `WorkerInstance` or
+`DataVolumeAttachment`; delete it and regenerate the preview with the current
+scripts. If an earlier attempt is still rolling back, wait for it to reach
+`UPDATE_ROLLBACK_COMPLETE` first.
+
 Prepare and run v2 after the shared stack update:
 
 ```powershell
