@@ -33,7 +33,9 @@ cached: every result directory is named with its MLflow run ID.
 
 ## Data layout
 
-Set `ALL_TMD_DATA_DIR` in `.env` (default `./data`) and provide:
+Copy `.env.example` to `.env`, then set `ALL_TMD_DATA_DIR` to the host directory
+containing the datasets (the local Windows example uses `D:/tmd-data`). If it is
+unset, Compose falls back to `./data`. The selected directory must contain:
 
 ```text
 data/
