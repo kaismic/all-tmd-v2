@@ -14,11 +14,26 @@ from all_tmd.ingest import (
     ingest_training_dataset,
     normalize_nor_frame,
     normalize_us_frame,
+    _duration_filter,
 )
 
 
 def test_training_adapters_are_registered():
     assert set(TrainingDatasetAdapter._registry) >= {"us-tmd", "nor-tmd"}
+
+
+def test_collector_duration_filter_has_no_upper_limit_when_disabled(config_factory):
+    frame = pd.DataFrame(
+        {
+            "session_id": ["long", "long"],
+            "timestamp_ms": [0, 10_800_000],
+        }
+    )
+    unlimited = config_factory(maximum_trip_seconds=None)
+    capped = config_factory(maximum_trip_seconds=7200)
+
+    assert _duration_filter(frame, unlimited).empty is False
+    assert _duration_filter(frame, capped).empty is True
 
 
 def test_us_normalization_uses_common_domain():

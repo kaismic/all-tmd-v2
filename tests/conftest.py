@@ -17,6 +17,7 @@ def config_factory(tmp_path):
         sensors: dict[str, list[str]] | None = None,
         collector_minimum_sampling_rate: dict[str, float] | None = None,
         minimum_trip_seconds: int = 0,
+        maximum_trip_seconds: int | None = 28_800,
         collector_max_sample_interval_ms: int | None = None,
         generic_minimum_sampling_rate: dict[str, float] | None = None,
         generic_maximum_sample_interval_ms: int | None = None,
@@ -62,7 +63,7 @@ def config_factory(tmp_path):
             "dataset": {
                 "work_dir": str(data_root / "work"),
                 "minimum_trip_seconds": minimum_trip_seconds,
-                "maximum_trip_seconds": 28_800,
+                "maximum_trip_seconds": maximum_trip_seconds,
                 "collector_max_sample_interval_ms": (
                     collector_max_sample_interval_ms
                 ),

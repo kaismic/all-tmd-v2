@@ -18,9 +18,12 @@ def test_frozen_snapshot_matches_published_membership():
     summary = verify_snapshot("manifests/sydney-166.json")
     assert summary["session_count"] == 166
     assert summary["participant_count"] == 7
-    assert summary["eligible_session_count"] == 155
+    assert summary["eligible_session_count"] == 157
     assert summary["excluded_tram_count"] == 9
-    assert len(summary["excluded_long_session_ids"]) == 2
+    assert len(summary["over_two_hour_session_ids"]) == 2
+    assert set(summary["over_two_hour_session_ids"]).issubset(
+        summary["eligible_session_ids"]
+    )
 
 
 def test_study_plan_generates_33_parent_runs():

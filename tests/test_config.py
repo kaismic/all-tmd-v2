@@ -224,6 +224,11 @@ def test_maximum_sample_interval_must_be_positive_or_null(config_factory):
         config_factory(collector_max_sample_interval_ms=0)
 
 
+def test_maximum_trip_duration_can_be_disabled(config_factory):
+    config = config_factory(maximum_trip_seconds=None)
+    assert config.dataset.maximum_trip_seconds is None
+
+
 def test_generic_sampling_quality_keys_are_rejected(config_factory):
     with pytest.raises(
         ValueError,

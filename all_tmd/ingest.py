@@ -737,10 +737,9 @@ def _duration_filter(frame: pd.DataFrame, config: PipelineConfig) -> pd.DataFram
         duration = (
             group["timestamp_ms"].max() - group["timestamp_ms"].min()
         ) / 1000.0
-        if (
-            config.dataset.minimum_trip_seconds
-            <= duration
-            <= config.dataset.maximum_trip_seconds
+        if duration >= config.dataset.minimum_trip_seconds and (
+            config.dataset.maximum_trip_seconds is None
+            or duration <= config.dataset.maximum_trip_seconds
         ):
             keep.append(str(session_id))
     return frame[frame["session_id"].astype(str).isin(keep)].reset_index(drop=True)

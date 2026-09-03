@@ -7,8 +7,9 @@ using fixed XGBoost hyperparameters selected without Sydney data.
 
 ## Implemented protocol
 
-- Frozen 166-session Sydney snapshot; bus/car/train and the two-hour rule leave
-  155 sessions before window-quality filtering.
+- Frozen 166-session Sydney snapshot; excluding tram leaves 157 three-class
+  sessions. There is no upper-duration filter because uploads were manually
+  inspected; the 30-second minimum and window-quality filters remain.
 - Seven participant-independent outer folds; a held-out participant never
   contributes calibration rows.
 - Three seeds and 33 parents: three NOR-only baselines plus five nonzero Sydney

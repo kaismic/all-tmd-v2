@@ -275,10 +275,9 @@ def feature_frame(
         start = int(session["timestamp_ms"].min())
         end = int(session["timestamp_ms"].max())
         duration = (end - start) / 1000.0
-        if not (
-            config.dataset.minimum_trip_seconds
-            <= duration
-            <= config.dataset.maximum_trip_seconds
+        if duration < config.dataset.minimum_trip_seconds or (
+            config.dataset.maximum_trip_seconds is not None
+            and duration > config.dataset.maximum_trip_seconds
         ):
             if report_progress:
                 progress(

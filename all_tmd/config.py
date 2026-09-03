@@ -38,7 +38,7 @@ class SourcesConfig:
 class DatasetConfig:
     work_dir: Path
     minimum_trip_seconds: int
-    maximum_trip_seconds: int
+    maximum_trip_seconds: int | None
     collector_max_sample_interval_ms: int | None
     input_manifest_digest: str
     snapshot_manifest: Path | None
@@ -263,7 +263,10 @@ class PipelineConfig:
             dataset=DatasetConfig(
                 work_dir=_path(dataset["work_dir"], "dataset.work_dir"),
                 minimum_trip_seconds=int(dataset["minimum_trip_seconds"]),
-                maximum_trip_seconds=int(dataset.get("maximum_trip_seconds", 28_800)),
+                maximum_trip_seconds=_optional_positive_int(
+                    dataset.get("maximum_trip_seconds", 28_800),
+                    "dataset.maximum_trip_seconds",
+                ),
                 collector_max_sample_interval_ms=collector_max_sample_interval_ms,
                 input_manifest_digest=str(dataset.get("input_manifest_digest", "unversioned")),
                 snapshot_manifest=(

@@ -14,8 +14,9 @@ The repository retains `all-tmd-v1` history. It deliberately does not edit
 
 - `manifests/sydney-166.json` freezes 166 pseudonymous sessions with session-ID
   digest `8931f5b287838320e9173639d4023da19f34271b6b8abdfdc63691102674124c`.
-- Tram is outside the task. The two-hour rule excludes two car sessions, leaving
-  155 three-class sessions before feature-window quality filtering.
+- Tram is outside the task, leaving 157 three-class sessions. The two sessions
+  longer than two hours remain included because every upload was manually
+  inspected. The 30-second minimum and sensor/window-quality checks still apply.
 - `study-plan.json` defines the 33 parent configurations and analysis seed.
 - `manifests/sydney-lopo.json`, generated after features, freezes seven LOPO
   folds. An existing different manifest is rejected.

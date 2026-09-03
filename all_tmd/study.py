@@ -110,7 +110,7 @@ def verify_snapshot(path: str | Path) -> dict[str, Any]:
         raise ValueError("Sydney snapshot digest does not match the published snapshot")
     participants = {str(row["participant_id"]) for row in sessions}
     modes = [str(row["vehicle_type"]) for row in sessions]
-    long_sessions = [
+    over_two_hour_sessions = [
         str(row["session_id"])
         for row in sessions
         if str(row["vehicle_type"]) in TARGET_MODES
@@ -120,7 +120,6 @@ def verify_snapshot(path: str | Path) -> dict[str, Any]:
         row
         for row in sessions
         if str(row["vehicle_type"]) in TARGET_MODES
-        and float(row.get("duration_seconds", 0.0)) <= 7200
     ]
     if len(participants) != 7:
         raise ValueError("Sydney snapshot must contain seven participants")
@@ -131,15 +130,15 @@ def verify_snapshot(path: str | Path) -> dict[str, Any]:
         "tram": 9,
     }:
         raise ValueError("Sydney snapshot mode counts are not the published counts")
-    if len(long_sessions) != 2 or len(eligible) != 155:
-        raise ValueError("two-hour eligibility must exclude exactly two target sessions")
+    if len(over_two_hour_sessions) != 2 or len(eligible) != 157:
+        raise ValueError("Sydney snapshot must contain 157 three-class sessions")
     return {
         "snapshot_digest": digest,
         "session_count": len(sessions),
         "participant_count": len(participants),
         "eligible_session_count": len(eligible),
         "excluded_tram_count": modes.count("tram"),
-        "excluded_long_session_ids": sorted(long_sessions),
+        "over_two_hour_session_ids": sorted(over_two_hour_sessions),
         "eligible_session_ids": sorted(str(row["session_id"]) for row in eligible),
     }
 

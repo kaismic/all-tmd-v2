@@ -20,7 +20,7 @@ sources:
 dataset:
   work_dir: /data/all-tmd-v2-work
   minimum_trip_seconds: 30
-  maximum_trip_seconds: 7200
+  maximum_trip_seconds: null
   collector_max_sample_interval_ms: 500
   input_manifest_digest: "8931f5b287838320e9173639d4023da19f34271b6b8abdfdc63691102674124c"
   snapshot_manifest: /app/manifests/sydney-166.json
