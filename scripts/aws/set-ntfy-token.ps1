@@ -1,5 +1,5 @@
 param(
-    [string]$ParameterName = "/all-tmd-v2/ntfy-token",
+    [string]$ParameterName = "/all-tmd-v1/ntfy-token",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = ""
 )

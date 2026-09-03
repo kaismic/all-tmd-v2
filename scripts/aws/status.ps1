@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$RunId,
-    [string]$StackName = "all-tmd-v2-worker",
+    [string]$StackName = "all-tmd-v1-worker",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = "",
     [int]$LogLines = 80
@@ -13,7 +13,7 @@ if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') {
 }
 . (Join-Path $PSScriptRoot "common.ps1")
 Initialize-AwsContext -Region $Region -Profile $Profile
-$outputs = Get-AllTmdStackOutputs -StackName $StackName
+$outputs = Get-AllTmdSharedStackOutputs -StackName $StackName
 $instanceId = $outputs.InstanceId
 $state = Invoke-AllTmdAws -Arguments @(
     "ec2", "describe-instances", "--instance-ids", $instanceId,
@@ -23,6 +23,10 @@ $state = ($state | Out-String).Trim()
 Write-Host "Instance: $instanceId ($state)"
 if ($state -eq "running") {
     Wait-AllTmdSsmOnline -InstanceId $instanceId -TimeoutSeconds 120
+    $activeOwner = Get-AllTmdActiveRunOwner -InstanceId $instanceId
+    if ($activeOwner -and $activeOwner -ne "all-tmd-v2") {
+        throw "Shared worker $instanceId is running $activeOwner, not all-tmd-v2. Use that project's status script."
+    }
     $commandId = Send-AllTmdSsmCommand -InstanceId $instanceId -Commands @(
         "systemctl show all-tmd-trials.service --property=ActiveState,SubState,Result,ExecMainStatus",
         "journalctl -u all-tmd-trials.service --no-pager -n $LogLines"

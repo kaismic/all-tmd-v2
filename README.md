@@ -72,8 +72,27 @@ MLflow dataset inputs.
 
 ## AWS EC2 workflow
 
-The CloudFormation and Systems Manager workflow is namespaced under
-`all-tmd-v2`. After deploying and uploading the immutable NOR-TMD input:
+All-TMD v2 reuses the `all-tmd-v1-worker` CloudFormation stack: the same EC2
+worker, encrypted 200 GiB EBS volume, private S3 bucket, network, IAM role, and
+USD 50 monthly budget notification. The v1 and v2 runners use the worker one at
+a time through the common `all-tmd-trials.service`; starting a second run while
+one is active is rejected.
+
+Update the existing v1-owned stack once to grant the v2 S3 permissions and
+publish its shared-worker compatibility contract. Preview the change set first:
+
+```powershell
+.\scripts\aws\deploy.ps1 -BudgetEmail you@example.com -NoExecuteChangeSet
+.\scripts\aws\deploy.ps1 -BudgetEmail you@example.com
+```
+
+The v2 deployment wrapper delegates to the adjacent `all-tmd-v1` project and
+must not create a second worker, volume, or bucket. The existing immutable
+NOR-TMD and US-TMD objects under `all-tmd-v1/inputs` are reused, as are their EBS
+copies, so v2 has no input-upload step. Confirmed Sydney sessions are refreshed
+directly from the collector backend.
+
+Prepare and run v2 after the shared stack update:
 
 ```powershell
 .\scripts\aws\prepare-run.ps1 -Mode Tune
@@ -88,7 +107,20 @@ The CloudFormation and Systems Manager workflow is namespaced under
 Full/smoke bundles require `model-lock.json` and
 `manifests/sydney-lopo.json`, checksum every contract, and identify an exact
 reachable commit. Each sweep owns its SQLite backend, artifact directory,
-results, logs, and resource report; it never uses a worker-wide MLflow database.
+results, logs, and resource report beneath the v2 namespace; it never uses a
+worker-wide MLflow database. V2 configuration/results use `all-tmd-v2` S3
+prefixes, run state uses `/mnt/all-tmd-data/cloud-runs/all-tmd-v2`, and work/cache
+data uses `/mnt/all-tmd-data/all-tmd-v2-work`.
+
+Status and stop commands detect which project owns the active service. A stop is
+refused when v1 is active unless `-ForceSharedWorker` is supplied. Infrastructure
+archival is disabled from v2; use v1's archive command only when both projects
+can be taken offline. Archiving retains S3 and snapshots EBS, and those resources
+remain billable. The budget is an alert, not a spending cap.
+
+Both projects retain Docker images and Git checkouts on the worker's 24 GiB root
+volume. Check `docker system df` and `df -h` periodically and prune unused Docker
+artifacts manually; no automatic cleanup is performed.
 
 ## Import isolated AWS runs
 
@@ -126,7 +158,6 @@ comparison and redrawing samples without every configured class.
 ```powershell
 python -m pytest -q
 docker compose config
-sam validate --template-file aws/cloudformation.yaml --lint
 ```
 
 Tests cover cache boundaries/recovery, snapshot invariants, LOPO leakage and

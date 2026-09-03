@@ -5,19 +5,20 @@ AWS_SCRIPTS = Path(__file__).parents[1] / "scripts" / "aws"
 
 
 def test_worker_setup_waits_for_ssm_instead_of_ec2_status_checks():
-    for name in ("deploy.ps1", "start-run.ps1"):
+    for name in ("start-run.ps1",):
         script = (AWS_SCRIPTS / name).read_text(encoding="utf-8")
 
         assert "Wait-AllTmdSsmOnline" in script
         assert '"instance-status-ok"' not in script
 
 
-def test_deploy_starts_an_existing_stopped_worker_before_validation():
+def test_deploy_delegates_to_the_v1_owned_shared_stack():
     deploy = (AWS_SCRIPTS / "deploy.ps1").read_text(encoding="utf-8")
 
-    assert 'if ($instanceState -eq "stopped")' in deploy
-    assert '"ec2", "start-instances"' in deploy
-    assert "Wait-AllTmdSsmOnline -InstanceId $instanceId" in deploy
+    assert '[string]$StackName = "all-tmd-v1-worker"' in deploy
+    assert '"..\\all-tmd-v1\\scripts\\aws\\deploy.ps1"' in deploy
+    assert "ConsumerProjectName = \"all-tmd-v2\"" in deploy
+    assert "[switch]$NoExecuteChangeSet" in deploy
 
 
 def test_ssm_wait_detects_an_externally_stopped_instance():
@@ -45,14 +46,61 @@ def test_cloud_runner_syncs_collector_backend_directly():
     runner = (AWS_SCRIPTS / "remote" / "run-trials-cloud.sh").read_text(
         encoding="utf-8"
     )
-    uploader = (AWS_SCRIPTS / "upload-inputs.ps1").read_text(encoding="utf-8")
-
     assert 'python3 "$bundle_dir/sync-collector-sessions.py"' in runner
     assert '--output-dir "$data_dir/downloaded_sessions"' in runner
     assert '--snapshot-path "$run_state_dir/collector-snapshot.json"' in runner
     assert '--run-id "$ALL_TMD_RUN_ID"' in runner
-    assert '@("nor-tmd-data", "us-tmd-data")' in uploader
-    assert 'all-tmd-v2/inputs/$source' in uploader
+    assert 'all-tmd-v1/inputs/$source' in runner
+    assert not (AWS_SCRIPTS / "upload-inputs.ps1").exists()
+
+
+def test_v2_scripts_require_the_shared_v1_stack_contract():
+    common = (AWS_SCRIPTS / "common.ps1").read_text(encoding="utf-8")
+    stack_consumers = (
+        "prepare-run.ps1",
+        "start-run.ps1",
+        "status.ps1",
+        "stop-worker.ps1",
+        "download-results.ps1",
+        "port-forward-mlflow.ps1",
+    )
+
+    assert "function Get-AllTmdSharedStackOutputs" in common
+    assert 'SharedWorkerContractVersion -ne "1"' in common
+    assert 'SharedWorkerConsumerProject -ne "all-tmd-v2"' in common
+    assert 'SharedInputsPrefix -ne "all-tmd-v1/inputs"' in common
+    for name in stack_consumers:
+        script = (AWS_SCRIPTS / name).read_text(encoding="utf-8")
+        assert '[string]$StackName = "all-tmd-v1-worker"' in script
+        assert "Get-AllTmdSharedStackOutputs" in script
+
+
+def test_shared_service_is_exclusive_and_project_aware():
+    runner = (AWS_SCRIPTS / "remote" / "run-trials-cloud.sh").read_text(
+        encoding="utf-8"
+    )
+    status = (AWS_SCRIPTS / "status.ps1").read_text(encoding="utf-8")
+    stopper = (AWS_SCRIPTS / "stop-worker.ps1").read_text(encoding="utf-8")
+    archiver = (AWS_SCRIPTS / "archive-stack.ps1").read_text(encoding="utf-8")
+
+    assert "service_name=all-tmd-trials.service" in runner
+    assert "project_name=all-tmd-v2" in runner
+    assert "ALL_TMD_PROJECT" in runner
+    assert "active-project" in runner
+    assert '$activeOwner -ne "all-tmd-v2"' in status
+    assert "[switch]$ForceSharedWorker" in stopper
+    assert '$activeOwner -ne "all-tmd-v2"' in stopper
+    assert "does not own stack" in archiver
+
+
+def test_v2_run_state_is_namespaced_on_the_shared_volume():
+    runner = (AWS_SCRIPTS / "remote" / "run-trials-cloud.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'cloud-runs/all-tmd-v2/$ALL_TMD_RUN_ID' in runner
+    assert '$data_dir/all-tmd-v2-work' in runner
+    assert '/opt/all-tmd-v2/checkouts/$git_commit' in runner
 
 
 def test_cloud_runner_uses_serverless_run_specific_mlflow_storage():

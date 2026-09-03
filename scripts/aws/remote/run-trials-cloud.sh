@@ -6,6 +6,8 @@ state_dir=/etc/all-tmd-v2
 install_dir=/usr/local/lib/all-tmd-v2
 service_name=all-tmd-trials.service
 data_dir=/mnt/all-tmd-data
+project_name=all-tmd-v2
+shared_state_dir=/etc/all-tmd-worker
 
 usage() {
     printf '%s\n' \
@@ -52,13 +54,15 @@ install_service() {
         return 1
     fi
 
-    install -d -m 0755 "$state_dir" "$install_dir"
+    install -d -m 0755 "$state_dir" "$install_dir" "$shared_state_dir"
     install -m 0755 "$0" "$install_dir/run-trials-cloud.sh"
     {
         printf 'ALL_TMD_AWS_BUCKET=%q\n' "$bucket"
         printf 'ALL_TMD_RUN_ID=%q\n' "$run_id"
+        printf 'ALL_TMD_PROJECT=%q\n' "$project_name"
     } >"$state_dir/run.env"
     chmod 0600 "$state_dir/run.env"
+    printf '%s\n' "$project_name" >"$shared_state_dir/active-project"
 
     cat >/etc/systemd/system/$service_name <<EOF
 [Unit]
@@ -127,7 +131,7 @@ manage_mlflow_server() {
         return 1
     fi
 
-    local run_state_dir="$data_dir/cloud-runs/$ALL_TMD_RUN_ID"
+    local run_state_dir="$data_dir/cloud-runs/all-tmd-v2/$ALL_TMD_RUN_ID"
     local manifest="$run_state_dir/config/run-manifest.json"
     [[ -f $manifest ]] || {
         printf '%s\n' "Active run manifest is not available yet." >&2
@@ -174,7 +178,7 @@ execute_run() {
     # function has unwound on an early failure.
     config_prefix="s3://$ALL_TMD_AWS_BUCKET/all-tmd-v2/config/$ALL_TMD_RUN_ID"
     result_prefix="s3://$ALL_TMD_AWS_BUCKET/all-tmd-v2/results/$ALL_TMD_RUN_ID"
-    run_state_dir="$data_dir/cloud-runs/$ALL_TMD_RUN_ID"
+    run_state_dir="$data_dir/cloud-runs/all-tmd-v2/$ALL_TMD_RUN_ID"
     bundle_dir="$run_state_dir/config"
     log_path="$run_state_dir/run.log"
     resource_path="$run_state_dir/resource-usage.txt"
@@ -305,7 +309,7 @@ execute_run() {
             continue
         fi
         aws s3 sync \
-            "s3://$ALL_TMD_AWS_BUCKET/all-tmd-v2/inputs/$source" \
+            "s3://$ALL_TMD_AWS_BUCKET/all-tmd-v1/inputs/$source" \
             "$data_dir/$source" --only-show-errors
     done
     python3 "$bundle_dir/sync-collector-sessions.py" \
@@ -373,7 +377,7 @@ execute_run() {
         docker compose run --rm study prepare-data
         if [[ $mode == tune ]]; then
             /usr/bin/time -v -o "$resource_path" docker compose run --rm study \
-                tune-source --output-root "/data/cloud-runs/$ALL_TMD_RUN_ID/results"
+                tune-source --output-root "/data/cloud-runs/all-tmd-v2/$ALL_TMD_RUN_ID/results"
         else
             docker compose run --rm study create-lopo
             local limit_args=()
@@ -382,7 +386,7 @@ execute_run() {
             fi
             /usr/bin/time -v -o "$resource_path" docker compose run --rm study \
                 run-study --execution-backend aws \
-                --output-root "/data/cloud-runs/$ALL_TMD_RUN_ID/results" "${limit_args[@]}"
+                --output-root "/data/cloud-runs/all-tmd-v2/$ALL_TMD_RUN_ID/results" "${limit_args[@]}"
         fi
     )
     final_status=$?

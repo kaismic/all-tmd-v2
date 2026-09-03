@@ -5,7 +5,7 @@ param(
     [string]$NtfyTopic = "",
     [string]$NtfyServer = "https://ntfy.sh",
     [string]$NtfyEvents = "all-trials",
-    [string]$StackName = "all-tmd-v2-worker",
+    [string]$StackName = "all-tmd-v1-worker",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = "",
     [switch]$NoAutoStop,
@@ -44,7 +44,7 @@ if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') {
     throw "RunId contains unsupported characters."
 }
 
-$outputs = Get-AllTmdStackOutputs -StackName $StackName
+$outputs = Get-AllTmdSharedStackOutputs -StackName $StackName
 $bundleDir = Join-Path ([System.IO.Path]::GetTempPath()) "all-tmd-$RunId"
 if (Test-Path -LiteralPath $bundleDir) {
     throw "Temporary run bundle already exists: $bundleDir"

@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$RunId,
-    [string]$StackName = "all-tmd-v2-worker",
+    [string]$StackName = "all-tmd-v1-worker",
     [string]$Region = "ap-southeast-2",
     [string]$Profile = "",
     [int]$LocalPort = 5002
@@ -13,7 +13,7 @@ if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') {
 }
 . (Join-Path $PSScriptRoot "common.ps1")
 Initialize-AwsContext -Region $Region -Profile $Profile
-$outputs = Get-AllTmdStackOutputs -StackName $StackName
+$outputs = Get-AllTmdSharedStackOutputs -StackName $StackName
 $instanceId = $outputs.InstanceId
 $instanceState = Get-AllTmdEc2InstanceState -InstanceId $instanceId
 if ($instanceState -ne "running") {
