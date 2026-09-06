@@ -7,8 +7,10 @@ use nested 10%, 25%, 50%, 75%, and 100% whole-session calibration subsets.
 
 This is a cross-regional calibration curve: XGBoost is retrained on each pooled
 training set, rather than pretrained and fine-tuned in the neural-network sense.
-The repository retains `all-tmd-v1` history. It deliberately does not edit
-`reports/report-6-revised.tex`; `report` produces inputs after real runs exist.
+The repository retains `all-tmd-v1` history. The `report` command produces
+analysis artifacts. The completed study is incorporated into the root
+workspace's `reports/report-7.tex`, preserving `report-6-revised.tex` as its
+unchanged historical base.
 
 ## Reproducibility contracts
 
@@ -161,6 +163,32 @@ Intervals use 5,000 paired hierarchical bootstrap iterations with seed
 comparison and redrawing samples without every configured class.
 
 ## Verification
+
+### Completed local study (6 September 2026)
+
+The completed report summary validates all 33 expected parents and one shared
+evaluation manifest. An additional report-7 audit recomputed all parent metrics
+from predictions, checked all 231 fold outputs, and verified matching test
+windows and paired calibration digests. Evaluation covers 8,668 windows from
+155 usable sessions and seven participants, after excluding tram and two
+sessions too short for the duration/window requirements.
+
+At full eligible calibration, mean macro F1 is 0.4597 for NOR-only, 0.6480 for
+Sydney-only, and 0.5767 for pooled training. Pooled minus NOR macro F1 is +0.1171
+(supplied paired 95% interval +0.0733 to +0.1796); pooled minus Sydney is -0.0713
+(-0.1879 to +0.1158). Local calibration improves the source-only reference;
+adding source data has no demonstrated aggregate advantage over the same local
+training sessions. These are participant-independent results and must not be
+equated with report 6's session-holdout scores near 0.88.
+
+`reports/report-7-artifacts/` in the root workspace archives the plots, CSVs,
+model/analysis contracts, audit script, and derived tables. The report explains
+the supplied bootstrap's estimator and cross-seed resampling limitations; its
+intervals were preserved rather than independently rerun. The root's existing
+ignore rule keeps these report artifacts local. Typesetting needs the original
+`references.bib`, which was absent from the workspace during analysis.
+
+### Automated checks
 
 ```powershell
 python -m pytest -q

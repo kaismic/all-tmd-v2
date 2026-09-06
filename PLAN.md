@@ -42,7 +42,18 @@ using fixed XGBoost hyperparameters selected without Sydney data.
 4. Retain the exact contracts and run all 33 configurations.
 5. Download/import isolated AWS stores where needed.
 6. Generate and validate the report artifacts.
-7. Insert real outputs into `reports/report-6-revised.tex` in a later change.
+7. Incorporate validated outputs into the root's `reports/report-7.tex`, using
+   `report-6-revised.tex` as an unchanged base. Complete on 6 September 2026.
 
-ONNX/deployment work and report insertion remain out of scope until real study
-results have been validated.
+The local run and report sequence is complete: 33 parents and 231 fold outputs
+were audited against saved predictions, with 155 usable Sydney sessions and
+8,668 evaluation windows. Report 7 contains the controlled comparison,
+calibration curves, paired intervals, class/participant analysis, and a clearly
+separated historical appendix. Companion audit artifacts remain in the root's
+Git-ignored `reports/` directory. The inherited bibliography is missing, so
+resolved citation typesetting still requires the original `references.bib`.
+
+ONNX/deployment work remains out of scope. Further validation should address
+new participants, car/bus errors, domain weighting and quality-filter asymmetry,
+and sensitivity of the supplied bootstrap to estimator and cross-seed sampling
+choices before making broader generalisation claims.
