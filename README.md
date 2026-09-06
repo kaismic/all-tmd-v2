@@ -9,8 +9,9 @@ This is a cross-regional calibration curve: XGBoost is retrained on each pooled
 training set, rather than pretrained and fine-tuned in the neural-network sense.
 The repository retains `all-tmd-v1` history. The `report` command produces
 analysis artifacts. The completed study is incorporated into the root
-workspace's `reports/report-7.tex`, preserving `report-6-revised.tex` as its
-unchanged historical base.
+workspace's `reports/report-7.tex`, now a standalone research article that
+integrates exploratory and controlled results. `report-6-revised.tex` remains
+unchanged.
 
 ## Reproducibility contracts
 
@@ -185,8 +186,10 @@ equated with report 6's session-holdout scores near 0.88.
 model/analysis contracts, audit script, and derived tables. The report explains
 the supplied bootstrap's estimator and cross-seed resampling limitations; its
 intervals were preserved rather than independently rerun. The root's existing
-ignore rule keeps these report artifacts local. Typesetting needs the original
-`references.bib`, which was absent from the workspace during analysis.
+ignore rule keeps these report artifacts local. The article embeds its numerical
+tables and uses the now-supplied `reports/images/` and `reports/references.bib`.
+Repository paths, run identifiers, and report-version references appear only in
+the separate evidence documentation, not in the article's prose.
 
 ### Automated checks
 

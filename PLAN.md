@@ -48,10 +48,12 @@ using fixed XGBoost hyperparameters selected without Sydney data.
 The local run and report sequence is complete: 33 parents and 231 fold outputs
 were audited against saved predictions, with 155 usable Sydney sessions and
 8,668 evaluation windows. Report 7 contains the controlled comparison,
-calibration curves, paired intervals, class/participant analysis, and a clearly
-separated historical appendix. Companion audit artifacts remain in the root's
-Git-ignored `reports/` directory. The inherited bibliography is missing, so
-resolved citation typesetting still requires the original `references.bib`.
+calibration curves, paired intervals, and class/participant analysis. The
+manuscript is a standalone research article: exploratory and controlled results
+are integrated under their respective protocols, and numerical tables are
+inline. The supplied images and bibliography are linked. Companion audit
+artifacts remain separate from the article in the root's Git-ignored `reports/`
+directory. PDF compilation has not been verified locally.
 
 ONNX/deployment work remains out of scope. Further validation should address
 new participants, car/bus errors, domain weighting and quality-filter asymmetry,
