@@ -47,6 +47,20 @@ def _write_metrics(
     )
 
 
+def _write_condition_map(path: Path) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "conditions": [
+                    {"condition": "A", "run_id": "abcdefg"},
+                    {"condition": "B", "run_id": "7654321"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_collects_unique_runs_and_ranks_selected_metric(tmp_path):
     _write_metrics(
         tmp_path,
@@ -103,6 +117,31 @@ def test_build_figure_uses_short_run_ids_and_mapped_title():
         figure.clear()
 
 
+def test_build_combined_figure_uses_condition_labels():
+    first = [MODULE.RunMetric("abcdefg123", 0.93, Path("first.json"))]
+    second = [MODULE.RunMetric("7654321abc", 0.89, Path("second.json"))]
+
+    figure = MODULE.build_combined_figure(
+        [
+            ("collector_holdout.balanced_accuracy", first),
+            ("collector_holdout.macro_f1", second),
+        ],
+        {"abcdefg": "A", "7654321": "B"},
+    )
+    try:
+        assert [axis.get_title() for axis in figure.axes] == [
+            "Best Balanced Accuracy",
+            "Best Macro F1 Score",
+        ]
+        assert [axis.get_xticklabels()[0].get_text() for axis in figure.axes] == [
+            "A",
+            "B",
+        ]
+        assert all(axis.get_xlabel() == "Condition" for axis in figure.axes)
+    finally:
+        figure.clear()
+
+
 def test_main_generates_metric_and_limit_filename(tmp_path, capsys):
     results_root = tmp_path / "aws-results"
     output_dir = tmp_path / "charts"
@@ -122,6 +161,42 @@ def test_main_generates_metric_and_limit_filename(tmp_path, capsys):
     )
 
     output_path = output_dir / "collector_holdout.balanced_accuracy-top-3.png"
+    assert exit_code == 0
+    assert output_path.is_file()
+    assert str(output_path) in capsys.readouterr().out
+
+
+def test_main_combines_metrics_and_loads_condition_map(tmp_path, capsys):
+    results_root = tmp_path / "aws-results"
+    output_dir = tmp_path / "charts"
+    condition_map = tmp_path / "conditions.json"
+    _write_condition_map(condition_map)
+    _write_metrics(
+        results_root,
+        download_id="download-one",
+        run_id="abcdefg1234567890123456789012345",
+        accuracy=0.94,
+        macro_f1=0.92,
+        balanced_accuracy=0.91,
+    )
+
+    exit_code = MODULE.main(
+        [
+            "collector_holdout.balanced_accuracy",
+            "3",
+            "--combine-with",
+            "collector_holdout.macro_f1",
+            "--condition-map",
+            str(condition_map),
+        ],
+        results_root=results_root,
+        output_dir=output_dir,
+    )
+
+    output_path = (
+        output_dir
+        / "collector_holdout.balanced_accuracy-and-macro_f1-top-3.png"
+    )
     assert exit_code == 0
     assert output_path.is_file()
     assert str(output_path) in capsys.readouterr().out

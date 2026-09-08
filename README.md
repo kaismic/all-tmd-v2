@@ -9,7 +9,7 @@ This is a cross-regional calibration curve: XGBoost is retrained on each pooled
 training set, rather than pretrained and fine-tuned in the neural-network sense.
 The repository retains `all-tmd-v1` history. The `report` command produces
 analysis artifacts. The completed study is incorporated into the root
-workspace's `reports/report-7.tex`, now a standalone research article that
+workspace's `reports/report-8.tex`, now a standalone research article that
 integrates exploratory and controlled results. `report-6-revised.tex` remains
 unchanged.
 
@@ -182,7 +182,7 @@ adding source data has no demonstrated aggregate advantage over the same local
 training sessions. These are participant-independent results and must not be
 equated with report 6's session-holdout scores near 0.88.
 
-`reports/report-7-artifacts/` in the root workspace archives the plots, CSVs,
+`reports/report-artifacts/` in the root workspace archives the plots, CSVs,
 model/analysis contracts, audit script, and derived tables. The report explains
 the supplied bootstrap's estimator and cross-seed resampling limitations; its
 intervals were preserved rather than independently rerun. The root's existing
@@ -190,6 +190,23 @@ ignore rule keeps these report artifacts local. The article embeds its numerical
 tables and uses the now-supplied `reports/images/` and `reports/references.bib`.
 Repository paths, run identifiers, and report-version references appear only in
 the separate evidence documentation, not in the article's prose.
+
+Exploratory top-metric charts can place multiple metrics in one figure and use
+the report's durable run-to-condition mapping for labels:
+
+```powershell
+python scripts/generate-top-metric-chart.py `
+  collector_holdout.balanced_accuracy 3 `
+  --combine-with collector_holdout.macro_f1 `
+  --condition-map ../../reports/report-artifacts/exploratory-run-conditions.json
+python scripts/generate-run-confusion-matrices.py <run-id> `
+  --condition-map ../../reports/report-artifacts/exploratory-run-conditions.json
+```
+
+The combined chart is named
+`collector_holdout.balanced_accuracy-and-macro_f1-top-3.png`. Mapped confusion
+matrices use names such as `conf-matrix-norm-e821edc-A.png` and titles such as
+`Condition A (row normalized)`.
 
 ### Automated checks
 

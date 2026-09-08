@@ -1,4 +1,4 @@
-"""Generate a bar chart of the top downloaded MLflow runs by metric."""
+"""Generate bar charts of the top downloaded MLflow runs by metric."""
 
 from __future__ import annotations
 
@@ -35,6 +35,58 @@ def _positive_integer(value: str) -> int:
 def output_filename(metric_name: str, n: int) -> str:
     """Return the requested image filename for a metric and result limit."""
     return f"{metric_name}-top-{n}.png"
+
+
+def combined_output_filename(metric_names: Sequence[str], n: int) -> str:
+    """Return a stable filename for a multi-metric chart."""
+    sections = [name.split(".", maxsplit=1) for name in metric_names]
+    if sections and all(section == sections[0][0] for section, _ in sections):
+        prefix = f"{sections[0][0]}."
+        metrics = "-and-".join(metric for _, metric in sections)
+    else:
+        prefix = ""
+        metrics = "-and-".join(name.replace(".", "-") for name in metric_names)
+    return f"{prefix}{metrics}-top-{n}.png"
+
+
+def load_condition_map(path: Path) -> dict[str, str]:
+    """Load run-ID prefixes and article condition labels from JSON."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{path}: invalid JSON ({error})") from error
+    document = _as_mapping(document, "condition map", path)
+    records = document.get("conditions")
+    if not isinstance(records, list) or not records:
+        raise ValueError(f"{path}: conditions must be a non-empty JSON array")
+
+    mapping: dict[str, str] = {}
+    for index, raw_record in enumerate(records):
+        record = _as_mapping(raw_record, f"conditions[{index}]", path)
+        run_id = record.get("run_id")
+        condition = record.get("condition")
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError(f"{path}: conditions[{index}].run_id must be a string")
+        if not isinstance(condition, str) or not condition:
+            raise ValueError(
+                f"{path}: conditions[{index}].condition must be a string"
+            )
+        if run_id in mapping:
+            raise ValueError(f"{path}: duplicate run ID {run_id!r}")
+        mapping[run_id] = condition
+    return mapping
+
+
+def condition_for_run(run_id: str, condition_map: dict[str, str]) -> str | None:
+    """Resolve a full MLflow ID against exact IDs or unique stored prefixes."""
+    matches = {
+        condition
+        for recorded_id, condition in condition_map.items()
+        if run_id.startswith(recorded_id) or recorded_id.startswith(run_id)
+    }
+    if len(matches) > 1:
+        raise ValueError(f"run ID {run_id!r} matches multiple conditions")
+    return next(iter(matches), None)
 
 
 def _artifact_metrics_paths(results_root: Path) -> list[Path]:
@@ -107,12 +159,35 @@ def collect_run_metrics(results_root: Path, metric_name: str) -> list[RunMetric]
     )
 
 
+def _plot_results(axis, results, metric_name, condition_map):
+    """Plot one metric on an existing Matplotlib axis."""
+    from matplotlib import colormaps
+
+    palette = colormaps["viridis"].resampled(max(1, len(results)))
+    labels = [
+        condition_for_run(result.run_id, condition_map) or result.run_id[:7]
+        for result in results
+    ]
+    bars = axis.bar(
+        labels,
+        [result.value for result in results],
+        color=[palette(index) for index in range(len(results))],
+    )
+    axis.set_title(METRIC_TITLES[metric_name])
+    axis.set_xlabel("Condition" if condition_map else "Run ID")
+    axis.set_ylabel(METRIC_TITLES[metric_name].removeprefix("Best "))
+    axis.set_ylim(0, 1)
+    axis.grid(axis="y", alpha=0.25)
+    axis.set_axisbelow(True)
+    axis.bar_label(bars, fmt="%.4f", padding=3)
+
+
 def build_figure(
     results: Sequence[RunMetric],
     metric_name: str,
+    condition_map: dict[str, str] | None = None,
 ):
     """Build the top-run bar chart without requiring an interactive backend."""
-    from matplotlib import colormaps
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
 
@@ -120,19 +195,26 @@ def build_figure(
     figure = Figure(figsize=(figure_width, 5.5))
     FigureCanvasAgg(figure)
     axis = figure.subplots()
-    palette = colormaps["viridis"].resampled(max(1, len(results)))
-    bars = axis.bar(
-        [result.run_id[:7] for result in results],
-        [result.value for result in results],
-        color=[palette(index) for index in range(len(results))],
-    )
-    axis.set_title(METRIC_TITLES[metric_name])
-    axis.set_xlabel("Run ID")
-    axis.set_ylabel(metric_name)
-    axis.set_ylim(0, 1)
-    axis.grid(axis="y", alpha=0.25)
-    axis.set_axisbelow(True)
-    axis.bar_label(bars, fmt="%.4f", padding=3)
+    _plot_results(axis, results, metric_name, condition_map or {})
+    figure.tight_layout()
+    return figure
+
+
+def build_combined_figure(
+    metric_results: Sequence[tuple[str, Sequence[RunMetric]]],
+    condition_map: dict[str, str] | None = None,
+):
+    """Build adjacent top-run charts as one publication-ready figure."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    if len(metric_results) < 2:
+        raise ValueError("a combined figure requires at least two metrics")
+    figure = Figure(figsize=(7.0 * len(metric_results), 5.5))
+    FigureCanvasAgg(figure)
+    axes = figure.subplots(1, len(metric_results), squeeze=False)[0]
+    for axis, (metric_name, results) in zip(axes, metric_results, strict=True):
+        _plot_results(axis, results, metric_name, condition_map or {})
     figure.tight_layout()
     return figure
 
@@ -146,6 +228,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("metric_name", choices=tuple(METRIC_TITLES))
     parser.add_argument("n", type=_positive_integer, help="maximum runs to chart")
+    parser.add_argument(
+        "--combine-with",
+        action="append",
+        choices=tuple(METRIC_TITLES),
+        default=[],
+        help="add another metric as an adjacent panel (repeatable)",
+    )
+    parser.add_argument(
+        "--condition-map",
+        type=Path,
+        help="JSON file mapping MLflow run IDs or prefixes to condition labels",
+    )
     parser.add_argument(
         "--results-root",
         type=Path,
@@ -191,10 +285,28 @@ def main(
         return 1
 
     try:
-        results = collect_run_metrics(results_root, args.metric_name)[: args.n]
+        metric_names = list(dict.fromkeys([args.metric_name, *args.combine_with]))
+        condition_map = (
+            load_condition_map(args.condition_map)
+            if args.condition_map is not None
+            else {}
+        )
+        metric_results = [
+            (metric_name, collect_run_metrics(results_root, metric_name)[: args.n])
+            for metric_name in metric_names
+        ]
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / output_filename(args.metric_name, args.n)
-        figure = build_figure(results, args.metric_name)
+        output_name = (
+            combined_output_filename(metric_names, args.n)
+            if len(metric_names) > 1
+            else output_filename(args.metric_name, args.n)
+        )
+        output_path = output_dir / output_name
+        figure = (
+            build_combined_figure(metric_results, condition_map)
+            if len(metric_results) > 1
+            else build_figure(metric_results[0][1], args.metric_name, condition_map)
+        )
         try:
             figure.savefig(output_path, dpi=150)
         finally:

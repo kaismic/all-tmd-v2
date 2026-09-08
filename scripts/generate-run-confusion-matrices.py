@@ -14,9 +14,50 @@ from typing import Any, Sequence
 SUMMARY_REPORT_KEYS = {"accuracy", "macro avg", "weighted avg"}
 
 
-def output_filename(run_id: str) -> str:
-    """Return the image filename containing the shortened run ID."""
-    return f"collector-holdout-confusion-matrix-normalized-{run_id[:7]}.png"
+def output_filename(run_id: str, condition: str | None = None) -> str:
+    """Return the concise image filename with run ID and optional condition."""
+    condition_suffix = f"-{condition}" if condition else ""
+    return f"conf-matrix-norm-{run_id[:7]}{condition_suffix}.png"
+
+
+def load_condition_map(path: Path) -> dict[str, str]:
+    """Load run-ID prefixes and article condition labels from JSON."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{path}: invalid JSON ({error})") from error
+    document = _as_mapping(document, "condition map", path)
+    records = document.get("conditions")
+    if not isinstance(records, list) or not records:
+        raise ValueError(f"{path}: conditions must be a non-empty JSON array")
+
+    mapping: dict[str, str] = {}
+    for index, raw_record in enumerate(records):
+        record = _as_mapping(raw_record, f"conditions[{index}]", path)
+        run_id = record.get("run_id")
+        condition = record.get("condition")
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError(f"{path}: conditions[{index}].run_id must be a string")
+        if not isinstance(condition, str) or not condition:
+            raise ValueError(
+                f"{path}: conditions[{index}].condition must be a string"
+            )
+        if run_id in mapping:
+            raise ValueError(f"{path}: duplicate run ID {run_id!r}")
+        mapping[run_id] = condition
+    return mapping
+
+
+def condition_for_run(run_id: str, condition_map: dict[str, str]) -> str | None:
+    """Resolve a full MLflow ID against exact IDs or unique stored prefixes."""
+    matches = {
+        condition
+        for recorded_id, condition in condition_map.items()
+        if run_id.startswith(recorded_id) or recorded_id.startswith(run_id)
+    }
+    if len(matches) > 1:
+        raise ValueError(f"run ID {run_id!r} matches multiple conditions")
+    return next(iter(matches), None)
 
 
 def find_run_artifacts(
@@ -105,6 +146,7 @@ def build_figure(
     matrix: Sequence[Sequence[float]],
     labels: Sequence[str],
     run_id: str,
+    condition: str | None = None,
 ):
     """Build a row-normalized confusion-matrix figure for one MLflow run."""
     import numpy as np
@@ -133,17 +175,23 @@ def build_figure(
         colorbar=False,
         values_format=".2f",
     )
-    axis.set_title(f"{run_id[:7]} (row normalized)")
+    title_label = f"Condition {condition}" if condition else run_id[:7]
+    axis.set_title(f"{title_label} (row normalized)")
     figure.tight_layout()
     return figure
 
 
-def generate_image(artifacts_dir: Path, run_id: str, output_dir: Path) -> Path:
+def generate_image(
+    artifacts_dir: Path,
+    run_id: str,
+    output_dir: Path,
+    condition: str | None = None,
+) -> Path:
     """Generate one normalized matrix image in the shared output directory."""
     matrix, labels = read_confusion_matrix(artifacts_dir / "metrics.json")
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / output_filename(run_id)
-    figure = build_figure(matrix, labels, run_id)
+    output_path = output_dir / output_filename(run_id, condition)
+    figure = build_figure(matrix, labels, run_id, condition)
     try:
         figure.savefig(output_path)
     finally:
@@ -170,6 +218,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Image destination (default: <results-root>/confusion-matrices)"
         ),
+    )
+    parser.add_argument(
+        "--condition-map",
+        type=Path,
+        help="JSON file mapping MLflow run IDs or prefixes to condition labels",
     )
     return parser
 
@@ -200,7 +253,16 @@ def main(
     )
 
     run_ids = list(dict.fromkeys(args.run_ids))
-    matches = find_run_artifacts(results_root, run_ids)
+    try:
+        condition_map = (
+            load_condition_map(args.condition_map)
+            if args.condition_map is not None
+            else {}
+        )
+        matches = find_run_artifacts(results_root, run_ids)
+    except (OSError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     failed = False
     for run_id in run_ids:
         artifact_dirs = matches[run_id]
@@ -209,7 +271,10 @@ def main(
             failed = True
             continue
         try:
-            output_path = generate_image(artifact_dirs[0], run_id, output_dir)
+            condition = condition_for_run(run_id, condition_map)
+            output_path = generate_image(
+                artifact_dirs[0], run_id, output_dir, condition
+            )
         except (OSError, ValueError) as error:
             print(f"error: {error}", file=sys.stderr)
             failed = True

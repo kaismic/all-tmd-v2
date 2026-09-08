@@ -67,11 +67,12 @@ def test_find_run_artifacts_matches_exact_mlflow_run_directories(tmp_path):
     assert matches == {first_id: [first], "missing": []}
 
 
-def test_build_figure_normalizes_rows_and_uses_short_run_id_title():
+def test_build_figure_normalizes_rows_and_uses_condition_title():
     figure = MODULE.build_figure(
         [[8, 2], [0, 0]],
         ["bus", "car"],
         "e821edccef3648d1be52848dd413f007",
+        "A",
     )
     try:
         axis = figure.axes[0]
@@ -79,7 +80,7 @@ def test_build_figure_normalizes_rows_and_uses_short_run_id_title():
             np.asarray(axis.images[0].get_array()),
             [[0.8, 0.2], [0.0, 0.0]],
         )
-        assert axis.get_title() == "e821edc (row normalized)"
+        assert axis.get_title() == "Condition A (row normalized)"
     finally:
         figure.clear()
 
@@ -97,7 +98,7 @@ def test_main_generates_standard_artifact_and_reports_missing_run(
     assert exit_code == 1
     assert output_path.is_file()
     assert output_path.name == (
-        "collector-holdout-confusion-matrix-normalized-0c8015e.png"
+        "conf-matrix-norm-0c8015e.png"
     )
     assert str(output_path) in captured.out
     assert "run ID not found: missing" in captured.err
@@ -115,3 +116,30 @@ def test_main_accepts_a_custom_output_directory(tmp_path):
 
     assert exit_code == 0
     assert (output_dir / MODULE.output_filename(run_id)).is_file()
+
+
+def test_main_uses_condition_in_title_and_filename(tmp_path):
+    run_id = "e821edccef3648d1be52848dd413f007"
+    _write_artifacts(tmp_path, run_id)
+    output_dir = tmp_path / "collected-images"
+    condition_map = tmp_path / "conditions.json"
+    condition_map.write_text(
+        json.dumps(
+            {"conditions": [{"condition": "A", "run_id": "e821edc"}]}
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = MODULE.main(
+        [
+            run_id,
+            "--output-dir",
+            str(output_dir),
+            "--condition-map",
+            str(condition_map),
+        ],
+        results_root=tmp_path,
+    )
+
+    assert exit_code == 0
+    assert (output_dir / "conf-matrix-norm-e821edc-A.png").is_file()
