@@ -17,6 +17,11 @@ METRIC_TITLES = {
     "collector_holdout.balanced_accuracy": "Best Balanced Accuracy",
 }
 
+COMBINED_METRIC_ORDER = {
+    "collector_holdout.macro_f1": 0,
+    "collector_holdout.balanced_accuracy": 1,
+}
+
 
 @dataclass(frozen=True)
 class RunMetric:
@@ -210,10 +215,16 @@ def build_combined_figure(
 
     if len(metric_results) < 2:
         raise ValueError("a combined figure requires at least two metrics")
+    ordered_results = sorted(
+        metric_results,
+        key=lambda item: COMBINED_METRIC_ORDER.get(
+            item[0], len(COMBINED_METRIC_ORDER)
+        ),
+    )
     figure = Figure(figsize=(7.0 * len(metric_results), 5.5))
     FigureCanvasAgg(figure)
     axes = figure.subplots(1, len(metric_results), squeeze=False)[0]
-    for axis, (metric_name, results) in zip(axes, metric_results, strict=True):
+    for axis, (metric_name, results) in zip(axes, ordered_results, strict=True):
         _plot_results(axis, results, metric_name, condition_map or {})
     figure.tight_layout()
     return figure

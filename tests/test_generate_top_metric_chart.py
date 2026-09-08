@@ -117,7 +117,7 @@ def test_build_figure_uses_short_run_ids_and_mapped_title():
         figure.clear()
 
 
-def test_build_combined_figure_uses_condition_labels():
+def test_build_combined_figure_uses_condition_labels_and_macro_f1_first():
     first = [MODULE.RunMetric("abcdefg123", 0.93, Path("first.json"))]
     second = [MODULE.RunMetric("7654321abc", 0.89, Path("second.json"))]
 
@@ -130,12 +130,12 @@ def test_build_combined_figure_uses_condition_labels():
     )
     try:
         assert [axis.get_title() for axis in figure.axes] == [
-            "Best Balanced Accuracy",
             "Best Macro F1 Score",
+            "Best Balanced Accuracy",
         ]
         assert [axis.get_xticklabels()[0].get_text() for axis in figure.axes] == [
-            "A",
             "B",
+            "A",
         ]
         assert all(axis.get_xlabel() == "Condition" for axis in figure.axes)
     finally:

@@ -206,7 +206,8 @@ python scripts/generate-run-confusion-matrices.py <run-id> `
 The combined chart is named
 `collector_holdout.balanced_accuracy-and-macro_f1-top-3.png`. Mapped confusion
 matrices use names such as `conf-matrix-norm-e821edc-A.png` and titles such as
-`Condition A (row normalized)`.
+`Condition A (row normalized)`. Combined figures place macro F1 on the left and
+balanced accuracy on the right, independent of command-line metric order.
 
 ### Automated checks
 
