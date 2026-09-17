@@ -252,6 +252,10 @@ def ingest_collector(config: PipelineConfig) -> Path:
         f"checkpoint_sessions={len(processed):,}"
     )
     for index, path in enumerate(files, start=1):
+        if not _is_sydney_collector_session(path):
+            ignored_files += 1
+            progress(f"Collector ingest file {index:,}/{len(files):,}: status=outside-sydney, path={path}")
+            continue
         frame = normalize_collector_payload(path, config.trial.labels)
         if frame.empty:
             ignored_files += 1
@@ -306,6 +310,13 @@ def _ingest_frozen_collector(config: PipelineConfig) -> Path:
     eligible = set(summary["eligible_session_ids"])
     output_dir = config.run_dir() / "events" / "collector"
     if (output_dir / "_SUCCESS").exists():
+        for path in _collector_session_files(
+            config.sources.collector.input_path,
+            config.sources.collector.include_globs,
+        ):
+            if path.name.removesuffix(".gz").removesuffix(".json") in eligible:
+                if not _is_sydney_collector_session(path):
+                    raise ValueError(f"Frozen Sydney session has a non-Sydney country: {path}")
         progress(f"Frozen collector events already complete: {output_dir}")
         return output_dir
     if output_dir.exists():
@@ -323,6 +334,8 @@ def _ingest_frozen_collector(config: PipelineConfig) -> Path:
         duration_filtered: set[str] = set()
         rows = 0
         for part, path in enumerate(files):
+            if not _is_sydney_collector_session(path):
+                raise ValueError(f"Frozen Sydney session has a non-Sydney country: {path}")
             frame = normalize_collector_payload(path, config.trial.labels)
             if frame.empty:
                 continue
@@ -680,6 +693,25 @@ def _load_sidecar_metadata(path: Path) -> dict[str, Any]:
             with candidate.open("r", encoding="utf-8") as stream:
                 return json.load(stream)
     return {}
+
+
+def _is_sydney_collector_session(path: Path) -> bool:
+    metadata = _load_sidecar_metadata(path)
+    parts = path.parts
+    path_participant = next(
+        (parts[index + 1] for index, part in enumerate(parts[:-1]) if part == "raw"),
+        None,
+    )
+    participant = metadata.get("participant_id") or path_participant
+    if path_participant and metadata.get("participant_id") not in (None, path_participant):
+        raise ValueError(f"Participant sidecar/path mismatch in {path}")
+    country = metadata.get("collection_country_code")
+    if country is not None and (not isinstance(country, str)
+                                or re.fullmatch(r"[A-Z]{2}", country) is None):
+        raise ValueError(f"Invalid collection country in {path}")
+    if country is None:
+        return participant != "participant_010"
+    return country == "AU"
 
 
 def _read_checkpoint(path: Path) -> set[str]:

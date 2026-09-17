@@ -7,6 +7,14 @@ use nested 10%, 25%, 50%, 75%, and 100% whole-session calibration subsets.
 
 This is a cross-regional calibration curve: XGBoost is retrained on each pooled
 training set, rather than pretrained and fine-tuned in the neural-network sense.
+
+The frozen Sydney manifest remains the study's source of session membership and
+does not contain `participant_010`. Ingestion rejects a frozen session whose
+sidecar explicitly labels it outside Australia. Generic collector ingestion
+also excludes labelled non-`AU` sessions and unlabelled `participant_010`
+sessions; other unlabelled legacy sessions remain eligible. The EC2 sync
+refreshes metadata sidecars for the frozen sessions from the existing
+confirmed-session index before snapshot creation.
 The repository retains `all-tmd-v1` history. The `report` command produces
 analysis artifacts. The completed study is incorporated into the root
 workspace's `reports/report-8.tex`, now a standalone research article that

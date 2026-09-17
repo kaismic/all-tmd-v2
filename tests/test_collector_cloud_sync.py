@@ -4,6 +4,7 @@ import importlib.util
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+import pytest
 
 
 SCRIPT_PATH = (
@@ -17,6 +18,27 @@ SPEC = importlib.util.spec_from_file_location("collector_cloud_sync", SCRIPT_PAT
 assert SPEC and SPEC.loader
 collector_cloud_sync = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collector_cloud_sync)
+
+
+def test_refresh_existing_metadata_updates_sidecar_without_payload(tmp_path, monkeypatch):
+    root = tmp_path / "downloaded_sessions"
+    payload = root / "raw" / "participant_010" / "device" / "one.json.gz"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"original")
+    sidecar = payload.with_suffix(f"{payload.suffix}.metadata.json")
+    old = {"session_id": "one", "participant_id": "participant_010",
+           "s3_key": "raw/participant_010/device/one.json.gz", "status": "received"}
+    sidecar.write_text(json.dumps(old), encoding="utf-8")
+    remote = {**old, "collection_country_code": "KR"}
+    monkeypatch.setattr(collector_cloud_sync, "query_sessions",
+                        lambda table, after: [remote.copy()])
+    assert collector_cloud_sync.refresh_existing_metadata("TransportSessions", root) == 1
+    assert collector_cloud_sync.refresh_existing_metadata("TransportSessions", root) == 0
+    assert json.loads(sidecar.read_text())["collection_country_code"] == "KR"
+    assert payload.read_bytes() == b"original"
+    remote["s3_key"] = "raw/participant_010/different.json.gz"
+    with pytest.raises(ValueError, match="metadata mismatch"):
+        collector_cloud_sync.refresh_existing_metadata("TransportSessions", root)
 
 
 def test_sync_downloads_eligible_confirmed_sessions_and_checkpoints(tmp_path, monkeypatch):
@@ -57,6 +79,7 @@ def test_sync_downloads_eligible_confirmed_sessions_and_checkpoints(tmp_path, mo
         "discovered_count": 2,
         "eligible_count": 1,
         "downloaded_count": 1,
+        "refreshed_metadata_count": 0,
     }
     assert queried_after == [("TransportSessions", "")]
     checkpoint = json.loads(

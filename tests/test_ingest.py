@@ -15,7 +15,25 @@ from all_tmd.ingest import (
     normalize_nor_frame,
     normalize_us_frame,
     _duration_filter,
+    _is_sydney_collector_session,
 )
+
+
+def test_sydney_cohort_uses_country_and_quarantines_unlabelled_participant_010(tmp_path):
+    payload = tmp_path / "session.json.gz"
+    sidecar = payload.with_suffix(f"{payload.suffix}.metadata.json")
+    for participant, country, expected in (
+        ("participant_009", None, True),
+        ("participant_010", None, False),
+        ("participant_010", "KR", False),
+        ("participant_010", "AU", True),
+        ("participant_011", "KR", False),
+    ):
+        sidecar.write_text(json.dumps({"participant_id": participant,
+                                       "collection_country_code": country}))
+        assert _is_sydney_collector_session(payload) is expected
+    raw_payload = tmp_path / "raw" / "participant_010" / "device" / "session.json.gz"
+    assert _is_sydney_collector_session(raw_payload) is False
 
 
 def test_training_adapters_are_registered():
