@@ -162,7 +162,7 @@ After all 33 parents exist, `report` validates the grid/shared evaluation digest
 and writes:
 
 - `transfer-curve.csv`, `.png`, and `.pdf` for macro F1/balanced accuracy;
-- `per-class-performance.png` for recall/F1;
+- `per-class-performance.png` for per-class F1;
 - `controlled-comparison.tex` at 100% calibration;
 - `paired-differences.csv` and `.tex`, including 95% intervals; and
 - `study-summary.json` with validation and data/model/split digests.

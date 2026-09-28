@@ -212,24 +212,24 @@ def _plot_per_class(runs: list[dict[str, Any]], plan: StudyPlan, output_dir: Pat
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
 
-    figure = Figure(figsize=(10, 7), layout="constrained")
+    figure = Figure(figsize=(10, 4.5), layout="constrained")
     FigureCanvasAgg(figure)
-    axes = figure.subplots(2, 1)
-    for axis, metric in zip(axes, ("recall", "f1")):
-        for condition in ("sydney_only", "nor_plus_sydney"):
-            for mode in plan.labels:
-                points = []
-                for fraction in plan.sydney_fractions[1:]:
-                    matching = [run for run in runs if run["condition"] == condition and float(run["sydney_fraction"]) == fraction]
-                    if matching:
-                        points.append((fraction * 100, np.mean([run["metrics"]["per_class"][mode][metric] for run in matching])))
-                if points:
-                    axis.plot(*zip(*points), marker="o", label=f"{condition}: {mode}")
-        axis.set_ylabel(metric.title())
-        axis.set_ylim(0, 1)
-        axis.grid(alpha=0.25)
-        axis.legend(ncol=2, fontsize=8)
-    axes[-1].set_xlabel("Sydney calibration sessions (%)")
+    axis = figure.subplots()
+    metric = "f1"
+    for condition in ("sydney_only", "nor_plus_sydney"):
+        for mode in plan.labels:
+            points = []
+            for fraction in plan.sydney_fractions[1:]:
+                matching = [run for run in runs if run["condition"] == condition and float(run["sydney_fraction"]) == fraction]
+                if matching:
+                    points.append((fraction * 100, np.mean([run["metrics"]["per_class"][mode][metric] for run in matching])))
+            if points:
+                axis.plot(*zip(*points), marker="o", label=f"{condition}: {mode}")
+    axis.set_ylabel(metric.title())
+    axis.set_ylim(0, 1)
+    axis.grid(alpha=0.25)
+    axis.legend(ncol=2, fontsize=8)
+    axis.set_xlabel("Sydney calibration sessions (%)")
     figure.savefig(output_dir / "per-class-performance.png", dpi=180)
 
 
