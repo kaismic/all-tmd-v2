@@ -412,11 +412,48 @@ report from its `results` directory.
 After all 33 parents exist, `report` validates the grid/shared evaluation digest
 and writes:
 
+- `per-run-mode-metrics.csv` for each parent run and transport mode;
+- `per-fold-mode-metrics.csv` for each parent run, held-out participant fold,
+  and transport mode;
 - `transfer-curve.csv`, `.png`, and `.pdf` for macro F1/balanced accuracy;
 - `per-class-performance.png` for per-class F1;
 - `controlled-comparison.tex` at 100% calibration;
 - `paired-differences.csv` and `.tex`, including 95% intervals; and
 - `study-summary.json` with validation and data/model/split digests.
+
+The two mode-metric CSVs contain `study_id`, `run_id`, `run_name`, `condition`,
+`sydney_fraction`, `seed`, `model_lock_digest`, `transport_mode`, `support`,
+`precision`, `recall`, `f1`, `accuracy`, and `balanced_accuracy`. Fold rows also
+contain `fold` and `held_out_participant_id`; their `run_id` identifies the parent.
+Rows retain individual seeds and runs, sorted by condition, fraction, seed, run
+identity, fold (where applicable), and configured mode order. The complete study
+has 99 parent-mode rows and 693 fold-mode rows when all seven folds are present.
+Parent scores use pooled evaluation windows, not averages of fold scores.
+
+Precision, recall, F1, and support come from saved per-class metrics. Accuracy
+and balanced accuracy treat the row's mode as positive and all other modes as
+negative, using the saved confusion matrix:
+
+- `accuracy = (TP + TN) / (TP + TN + FP + FN)`;
+- `balanced_accuracy = (TP / (TP + FN) + TN / (TN + FP)) / 2`.
+
+These are per-mode one-vs-rest scores; the existing transfer curves retain their
+overall multiclass metrics. Scores are proportions from 0 to 1 without explicit
+rounding, and support counts evaluation windows. Undefined precision, recall,
+and F1 retain the existing zero values. Balanced accuracy is blank if positive
+or negative support is absent; accuracy is blank for an empty evaluation.
+Older artifacts without run IDs have blank IDs, and artifacts without embedded
+folds contribute no fold rows. Both CSVs always include their column headers.
+`--allow-partial` exports the available runs under the existing validation rules.
+
+Regenerate these CSVs from existing results without retraining:
+
+```powershell
+.\scripts\study.ps1 report --results-root /data/all-tmd-v2-results --output-dir /data/report-artifacts
+```
+
+The CSVs are written alongside the existing artifacts in `--output-dir`
+(container `/data` maps to the configured host data directory).
 
 Intervals use 5,000 paired hierarchical bootstrap iterations with seed
 `20260903`, resampling seeds, participants, and sessions identically across a

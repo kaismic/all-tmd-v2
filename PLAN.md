@@ -32,6 +32,17 @@ using fixed XGBoost hyperparameters selected without Sydney data.
   canonical local MLflow experiment.
 - Report generation with paired hierarchical-bootstrap intervals and CSV, PNG,
   PDF, LaTeX, and JSON outputs.
+- Individual transport-mode exports: `per-run-mode-metrics.csv` retains each
+  parent's pooled scores; `per-fold-mode-metrics.csv` retains each held-out
+  participant fold's scores, with run/condition/fraction/seed/model identities.
+  Both include precision, recall, F1, support, and one-vs-rest accuracy and
+  balanced accuracy from saved confusion counts. Accuracy is `(TP + TN) / N`;
+  balanced accuracy is `(TP / (TP + FN) + TN / (TN + FP)) / 2`. Undefined
+  balanced accuracy is blank when either positive or negative support is absent;
+  empty-evaluation accuracy is blank. Existing precision/recall/F1 zero handling
+  is retained. Rerun `scripts/study.ps1 report --results-root <results>
+  --output-dir <artifacts>` to export existing results without retraining or
+  migrating stored metrics. See README for container paths and CSV columns.
 - Exact dependency lock and matching local/EC2 CLI contracts.
 
 ## Operational sequence

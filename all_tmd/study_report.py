@@ -12,6 +12,14 @@ from all_tmd.study_runner import classification_metrics
 
 
 METRICS = ("macro_f1", "balanced_accuracy")
+RUN_MODE_COLUMNS = (
+    "study_id", "run_id", "run_name", "condition", "sydney_fraction", "seed",
+    "model_lock_digest", "transport_mode", "support", "precision", "recall",
+    "f1", "accuracy", "balanced_accuracy",
+)
+FOLD_MODE_COLUMNS = RUN_MODE_COLUMNS[:7] + (
+    "fold", "held_out_participant_id",
+) + RUN_MODE_COLUMNS[7:]
 
 
 def collect_runs(results_root: str | Path, study_id: str) -> list[dict[str, Any]]:
@@ -50,6 +58,7 @@ def report_study(
         )
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
+    _write_mode_metrics(runs, plan, destination)
     curve_rows = _curve_rows(runs, plan)
     curve = pd.DataFrame(curve_rows)
     curve.to_csv(destination / "transfer-curve.csv", index=False)
@@ -100,6 +109,76 @@ def report_study(
         json.dumps(summary, indent=2) + "\n", encoding="utf-8"
     )
     return summary
+
+
+def _mode_metric_rows(
+    metrics: dict[str, Any], labels: dict[str, int]
+) -> list[dict[str, Any]]:
+    """Derive one-vs-rest scores in the saved confusion matrix's label order."""
+    matrix = np.asarray(metrics["confusion_matrix"], dtype=np.int64)
+    total = int(matrix.sum())
+    rows = []
+    for index, mode in enumerate(labels):
+        tp = int(matrix[index, index])
+        positive = int(matrix[index, :].sum())
+        negative = total - positive
+        fp = int(matrix[:, index].sum()) - tp
+        tn = negative - fp
+        detail = metrics["per_class"][mode]
+        rows.append(
+            {
+                "transport_mode": mode,
+                "support": detail["support"],
+                "precision": detail["precision"],
+                "recall": detail["recall"],
+                "f1": detail["f1"],
+                "accuracy": (tp + tn) / total if total else None,
+                "balanced_accuracy": (
+                    (tp / positive + tn / negative) / 2
+                    if positive and negative else None
+                ),
+            }
+        )
+    return rows
+
+
+def _write_mode_metrics(
+    runs: list[dict[str, Any]], plan: StudyPlan, output_dir: Path
+) -> None:
+    parent_rows = []
+    fold_rows = []
+    ordered_runs = sorted(
+        runs,
+        key=lambda run: (
+            run["condition"], float(run["sydney_fraction"]), int(run["seed"]),
+            run["run_name"], run.get("run_id") or "", run.get("metrics_path", ""),
+        ),
+    )
+    for run in ordered_runs:
+        identity = {column: run[column] for column in RUN_MODE_COLUMNS[:7] if column != "run_id"}
+        identity["run_id"] = run.get("run_id") or ""
+        parent_rows.extend(
+            {**identity, **row} for row in _mode_metric_rows(run["metrics"], plan.labels)
+        )
+        for fold in sorted(
+            run.get("folds", []),
+            key=lambda fold: (int(fold["fold"]), str(fold["held_out_participant_id"])),
+        ):
+            fold_rows.extend(
+                {
+                    **identity,
+                    "fold": fold["fold"],
+                    "held_out_participant_id": fold["held_out_participant_id"],
+                    **row,
+                }
+                for row in _mode_metric_rows(fold["metrics"], plan.labels)
+            )
+    pd.DataFrame(parent_rows, columns=RUN_MODE_COLUMNS).to_csv(
+        output_dir / "per-run-mode-metrics.csv", index=False
+    )
+    pd.DataFrame(fold_rows, columns=FOLD_MODE_COLUMNS).to_csv(
+        output_dir / "per-fold-mode-metrics.csv", index=False
+    )
 
 
 def _curve_rows(runs: list[dict[str, Any]], plan: StudyPlan) -> list[dict[str, Any]]:
