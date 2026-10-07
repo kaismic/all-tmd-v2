@@ -43,6 +43,15 @@ using fixed XGBoost hyperparameters selected without Sydney data.
   is retained. Rerun `scripts/study.ps1 report --results-root <results>
   --output-dir <artifacts>` to export existing results without retraining or
   migrating stored metrics. See README for container paths and CSV columns.
+- Select report artifacts with `report --files <filename> [<filename> ...]`;
+  omission generates all ten files. Each CSV, PNG, PDF, LaTeX, and summary output
+  can be selected independently. For just the mode CSVs use
+  `--files per-run-mode-metrics.csv per-fold-mode-metrics.csv`; saved metrics
+  suffice without prediction files, bootstrapping, or plotting. Curve and paired
+  calculations run only for dependent selections; `study-summary.json` still
+  computes the curve for its digest. Validation remains in effect. Selected
+  files are overwritten, unselected files are preserved, and printed metadata
+  lists `generated_files` with a null `curve_digest` when the curve was skipped.
 - Exact dependency lock and matching local/EC2 CLI contracts.
 
 ## Operational sequence

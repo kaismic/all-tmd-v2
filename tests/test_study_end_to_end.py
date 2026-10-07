@@ -180,6 +180,9 @@ def test_report_generates_complete_tables_figures_and_paired_intervals(
 
     assert summary["valid"] is (run_count == 33)
     assert summary["observed_parent_runs"] == run_count
+    assert len(list(output.iterdir())) == 10
+    assert set(summary["generated_files"]) == {path.name for path in output.iterdir()}
+    assert summary["curve_digest"] is not None
     for name in (
         "transfer-curve.csv",
         "transfer-curve.png",

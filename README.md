@@ -446,14 +446,44 @@ Older artifacts without run IDs have blank IDs, and artifacts without embedded
 folds contribute no fold rows. Both CSVs always include their column headers.
 `--allow-partial` exports the available runs under the existing validation rules.
 
-Regenerate these CSVs from existing results without retraining:
+Generate only these CSVs from existing results without retraining:
 
 ```powershell
-.\scripts\study.ps1 report --results-root /data/all-tmd-v2-results --output-dir /data/report-artifacts
+.\scripts\study.ps1 report `
+  --results-root /data/all-tmd-v2-results `
+  --output-dir /data/report-artifacts `
+  --files per-run-mode-metrics.csv per-fold-mode-metrics.csv
 ```
 
-The CSVs are written alongside the existing artifacts in `--output-dir`
-(container `/data` maps to the configured host data directory).
+Omit `--files` to generate all ten artifacts. Otherwise, supply one or more exact
+filenames from this list (each can be selected independently):
+
+| Filename | Additional work and inputs |
+| --- | --- |
+| `per-run-mode-metrics.csv` | Saved parent metrics only |
+| `per-fold-mode-metrics.csv` | Saved embedded fold metrics only |
+| `per-class-performance.png` | Saved metrics and plotting |
+| `transfer-curve.csv` | Predictions and transfer-curve bootstrap calculations |
+| `transfer-curve.png` | Predictions, transfer-curve calculations, and plotting |
+| `transfer-curve.pdf` | Predictions, transfer-curve calculations, and plotting |
+| `controlled-comparison.tex` | Predictions and transfer-curve calculations |
+| `paired-differences.csv` | Predictions and paired bootstrap calculations |
+| `paired-differences.tex` | Predictions and paired bootstrap calculations |
+| `study-summary.json` | Predictions and transfer-curve calculations for `curve_digest` |
+
+Selecting only the mode CSVs requires saved `metrics.json` files, the study plan,
+and its snapshot manifest; no `predictions.parquet` files, bootstrap calculations,
+or plotting are needed. Run-grid, duplicate-run, and evaluation-digest validation
+still apply, including `--allow-partial`. Shared calculations run once per report
+only when required by the selection. Repeated filenames are deduplicated; empty
+or unknown selections are rejected.
+
+Selected files are written to `--output-dir` (container `/data` maps to the
+configured host data directory). Existing selected files are overwritten;
+existing unselected files are left untouched. Use a new output directory if it
+should contain only the selected artifacts. The command still prints JSON
+metadata, including `generated_files`, even when `study-summary.json` is not
+selected. Its `curve_digest` is `null` when curve calculations were skipped.
 
 Intervals use 5,000 paired hierarchical bootstrap iterations with seed
 `20260903`, resampling seeds, participants, and sessions identically across a

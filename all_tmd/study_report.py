@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,14 @@ from all_tmd.study_runner import classification_metrics
 
 
 METRICS = ("macro_f1", "balanced_accuracy")
+MODE_FILES = ("per-run-mode-metrics.csv", "per-fold-mode-metrics.csv")
+CURVE_PLOT_FILES = ("transfer-curve.png", "transfer-curve.pdf")
+CURVE_FILES = (
+    "transfer-curve.csv", *CURVE_PLOT_FILES,
+    "controlled-comparison.tex", "study-summary.json",
+)
+PAIRED_FILES = ("paired-differences.csv", "paired-differences.tex")
+REPORT_FILES = (*MODE_FILES, *CURVE_FILES, "per-class-performance.png", *PAIRED_FILES)
 RUN_MODE_COLUMNS = (
     "study_id", "run_id", "run_name", "condition", "sydney_fraction", "seed",
     "model_lock_digest", "transport_mode", "support", "precision", "recall",
@@ -22,14 +31,16 @@ FOLD_MODE_COLUMNS = RUN_MODE_COLUMNS[:7] + (
 ) + RUN_MODE_COLUMNS[7:]
 
 
-def collect_runs(results_root: str | Path, study_id: str) -> list[dict[str, Any]]:
+def collect_runs(
+    results_root: str | Path, study_id: str, *, require_predictions: bool = True
+) -> list[dict[str, Any]]:
     runs = []
     for path in Path(results_root).rglob("metrics.json"):
         raw = json.loads(path.read_text(encoding="utf-8"))
         if raw.get("study_id") != study_id or raw.get("condition") is None:
             continue
         prediction_path = path.with_name("predictions.parquet")
-        if not prediction_path.exists():
+        if require_predictions and not prediction_path.exists():
             raise FileNotFoundError(f"predictions are missing for {path}")
         raw["metrics_path"] = str(path)
         raw["predictions_path"] = str(prediction_path)
@@ -43,8 +54,19 @@ def report_study(
     results_root: str | Path,
     output_dir: str | Path,
     allow_partial: bool = False,
+    files: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    runs = collect_runs(results_root, plan.study_id)
+    selected = set(REPORT_FILES if files is None else files)
+    if not selected:
+        raise ValueError("select at least one report filename")
+    unknown = selected.difference(REPORT_FILES)
+    if unknown:
+        raise ValueError(f"unknown report filenames: {sorted(unknown)}")
+    needs_curve = bool(selected.intersection(CURVE_FILES))
+    needs_paired = bool(selected.intersection(PAIRED_FILES))
+    runs = collect_runs(
+        results_root, plan.study_id, require_predictions=needs_curve or needs_paired
+    )
     expected = {spec.key for spec in plan.parent_specs()}
     actual = {run["run_name"] for run in runs}
     missing = sorted(expected - actual)
@@ -58,16 +80,30 @@ def report_study(
         )
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
-    _write_mode_metrics(runs, plan, destination)
-    curve_rows = _curve_rows(runs, plan)
-    curve = pd.DataFrame(curve_rows)
-    curve.to_csv(destination / "transfer-curve.csv", index=False)
-    _plot_transfer_curve(curve, destination)
-    _plot_per_class(runs, plan, destination)
-    _write_controlled_table(curve, destination / "controlled-comparison.tex")
-    paired = _paired_rows(runs, plan)
-    pd.DataFrame(paired).to_csv(destination / "paired-differences.csv", index=False)
-    _write_paired_table(paired, destination / "paired-differences.tex")
+    mode_files = [name for name in MODE_FILES if name in selected]
+    if mode_files:
+        _write_mode_metrics(runs, plan, destination, files=mode_files)
+    curve_rows = None
+    if needs_curve:
+        curve_rows = _curve_rows(runs, plan)
+        curve = pd.DataFrame(curve_rows, columns=(
+            "condition", "sydney_fraction", "metric", "estimate", "ci_lower", "ci_upper", "seeds",
+        ))
+        if "transfer-curve.csv" in selected:
+            curve.to_csv(destination / "transfer-curve.csv", index=False)
+        plot_files = [name for name in CURVE_PLOT_FILES if name in selected]
+        if plot_files:
+            _plot_transfer_curve(curve, destination, files=plot_files)
+        if "controlled-comparison.tex" in selected:
+            _write_controlled_table(curve, destination / "controlled-comparison.tex")
+    if "per-class-performance.png" in selected:
+        _plot_per_class(runs, plan, destination)
+    if needs_paired:
+        paired = _paired_rows(runs, plan)
+        if "paired-differences.csv" in selected:
+            pd.DataFrame(paired).to_csv(destination / "paired-differences.csv", index=False)
+        if "paired-differences.tex" in selected:
+            _write_paired_table(paired, destination / "paired-differences.tex")
     summary = {
         "schema_version": 1,
         "study_id": plan.study_id,
@@ -97,7 +133,8 @@ def report_study(
         "snapshot_manifest_digest": canonical_digest(
             json.loads(plan.snapshot_path.read_text(encoding="utf-8"))
         ),
-        "curve_digest": canonical_digest(curve_rows),
+        "curve_digest": canonical_digest(curve_rows) if curve_rows is not None else None,
+        "generated_files": [name for name in REPORT_FILES if name in selected],
         "analysis_seed": plan.analysis_seed,
         "bootstrap_iterations": plan.bootstrap_iterations,
         "validation": {
@@ -105,9 +142,10 @@ def report_study(
             "shared_evaluation_manifest": len(digests) == 1,
         },
     }
-    (destination / "study-summary.json").write_text(
-        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
-    )
+    if "study-summary.json" in selected:
+        (destination / "study-summary.json").write_text(
+            json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+        )
     return summary
 
 
@@ -143,7 +181,8 @@ def _mode_metric_rows(
 
 
 def _write_mode_metrics(
-    runs: list[dict[str, Any]], plan: StudyPlan, output_dir: Path
+    runs: list[dict[str, Any]], plan: StudyPlan, output_dir: Path,
+    *, files: Sequence[str] = MODE_FILES,
 ) -> None:
     parent_rows = []
     fold_rows = []
@@ -157,9 +196,12 @@ def _write_mode_metrics(
     for run in ordered_runs:
         identity = {column: run[column] for column in RUN_MODE_COLUMNS[:7] if column != "run_id"}
         identity["run_id"] = run.get("run_id") or ""
-        parent_rows.extend(
-            {**identity, **row} for row in _mode_metric_rows(run["metrics"], plan.labels)
-        )
+        if "per-run-mode-metrics.csv" in files:
+            parent_rows.extend(
+                {**identity, **row} for row in _mode_metric_rows(run["metrics"], plan.labels)
+            )
+        if "per-fold-mode-metrics.csv" not in files:
+            continue
         for fold in sorted(
             run.get("folds", []),
             key=lambda fold: (int(fold["fold"]), str(fold["held_out_participant_id"])),
@@ -173,12 +215,14 @@ def _write_mode_metrics(
                 }
                 for row in _mode_metric_rows(fold["metrics"], plan.labels)
             )
-    pd.DataFrame(parent_rows, columns=RUN_MODE_COLUMNS).to_csv(
-        output_dir / "per-run-mode-metrics.csv", index=False
-    )
-    pd.DataFrame(fold_rows, columns=FOLD_MODE_COLUMNS).to_csv(
-        output_dir / "per-fold-mode-metrics.csv", index=False
-    )
+    if "per-run-mode-metrics.csv" in files:
+        pd.DataFrame(parent_rows, columns=RUN_MODE_COLUMNS).to_csv(
+            output_dir / "per-run-mode-metrics.csv", index=False
+        )
+    if "per-fold-mode-metrics.csv" in files:
+        pd.DataFrame(fold_rows, columns=FOLD_MODE_COLUMNS).to_csv(
+            output_dir / "per-fold-mode-metrics.csv", index=False
+        )
 
 
 def _curve_rows(runs: list[dict[str, Any]], plan: StudyPlan) -> list[dict[str, Any]]:
@@ -257,7 +301,9 @@ def _hierarchical_indices(frame: pd.DataFrame, rng: np.random.Generator) -> np.n
     return np.asarray(indices, dtype=int)
 
 
-def _plot_transfer_curve(curve: pd.DataFrame, output_dir: Path) -> None:
+def _plot_transfer_curve(
+    curve: pd.DataFrame, output_dir: Path, *, files: Sequence[str] = CURVE_PLOT_FILES
+) -> None:
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
 
@@ -283,8 +329,10 @@ def _plot_transfer_curve(curve: pd.DataFrame, output_dir: Path) -> None:
         axis.set_ylim(0, 1)
         axis.grid(alpha=0.25)
         axis.legend()
-    figure.savefig(output_dir / "transfer-curve.png", dpi=180)
-    figure.savefig(output_dir / "transfer-curve.pdf")
+    if "transfer-curve.png" in files:
+        figure.savefig(output_dir / "transfer-curve.png", dpi=180)
+    if "transfer-curve.pdf" in files:
+        figure.savefig(output_dir / "transfer-curve.pdf")
 
 
 def _plot_per_class(runs: list[dict[str, Any]], plan: StudyPlan, output_dir: Path) -> None:

@@ -9,7 +9,7 @@ from all_tmd.ingest import ingest_collector, ingest_training_dataset
 from all_tmd.mlflow_importer import import_mlflow_runs
 from all_tmd.source_tuning import promote_model, tune_source
 from all_tmd.study import StudyPlan, create_lopo_manifest, verify_snapshot, verify_snapshot_files
-from all_tmd.study_report import report_study
+from all_tmd.study_report import REPORT_FILES, report_study
 from all_tmd.study_runner import read_feature_dataset, run_study
 from all_tmd.windowing import build_features, feature_output_dir
 
@@ -42,6 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--results-root", default="/data/all-tmd-v2-results")
     report.add_argument("--output-dir", default="report-artifacts")
     report.add_argument("--allow-partial", action="store_true")
+    report.add_argument(
+        "--files", nargs="+", choices=REPORT_FILES, metavar="FILENAME",
+        help="Generate only these report files (default: all). Choices: %(choices)s",
+    )
     return parser
 
 
@@ -67,6 +71,7 @@ def main() -> None:
             results_root=args.results_root,
             output_dir=args.output_dir,
             allow_partial=args.allow_partial,
+            files=args.files,
         )
     else:
         config = PipelineConfig.from_files(args.config, args.trial)
