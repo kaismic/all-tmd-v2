@@ -39,8 +39,8 @@ unchanged.
 Ingestion and feature caching are separate. Ingestion is keyed by the snapshot
 and ingestion contract. Features are keyed by the ingestion artifact bytes,
 feature contract, and quality settings. Deterministic entries use temporary
-directories, atomic promotion, `_SUCCESS`, and JSON manifests. Training is never
-cached: every result directory is named with its MLflow run ID.
+directories, atomic promotion, `_SUCCESS`, and JSON manifests. Controlled-study
+training is never cached: every result directory is named with its MLflow run ID.
 
 ## Data layout
 
@@ -56,6 +56,182 @@ data/
 
 Local verification fails on a missing eligible frozen session and ignores later
 uploads. AWS queries the complete collector index and downloads only manifest IDs.
+
+## Changing datasets and training settings
+
+There are two entry points. `scripts/study.ps1` / `scripts/study.sh` run the
+controlled v2 protocol through `all_tmd.study_cli`. The retained
+`scripts/run-trials.ps1` / `scripts/run-trials.sh` run the exploratory pipeline
+through `all_tmd.cli`. They read different trial files, and many exploratory
+training options do **not** control the study. The instructions below first
+describe the controlled study used by the local and AWS workflows.
+
+### Where to specify changes
+
+| File or argument | What it controls in the study |
+| --- | --- |
+| `.env`: `ALL_TMD_DATA_DIR` | Host directory mounted at `/data`; changing it relocates inputs and outputs. |
+| `model.config.yaml`: `sources` | Input directories and file globs for ingestion. Use container paths such as `/data/nor-tmd-data`, not Windows paths. |
+| `model.config.yaml`: `dataset` and `collector_minimum_sampling_rate` | Work/cache directory, input version, snapshot path, trip-duration and collector quality filters. |
+| `study-trial.json`: first object's `features` | Window length, step, context windows, sensors, and aggregations. The study reads only the first array entry; adding entries does not add runs. |
+| `study-plan.json` | Frozen conditions, fractions, seeds, labels, manifest/lock paths, study ID, and report bootstrap settings. Several values are validated against fixed constants, as described below. |
+| `model.config.yaml`: `training.n_jobs` | Model CPU parallelism (`-1` uses all available cores). This does not set the number of study runs. |
+| `model.config.yaml`: `mlflow` | Whether to track local runs, experiment name, and tracking URI. AWS bundles force tracking on with an isolated SQLite store. |
+| `run-study --output-root`, `report --results-root`, `report --output-dir` | Raw run output, report input, and generated report locations. |
+
+Run commands from this repository. To use copies of the three configuration
+files locally, put global options **before** the subcommand:
+
+```powershell
+.\scripts\study.ps1 --config model.custom.yaml --trial study-trial.custom.json --plan study-plan.custom.json prepare-data
+```
+
+Pass the same options to `create-lopo`, `tune-source`, `promote-model`,
+`run-study`, and `report`. Relative manifest/lock paths in the plan are resolved
+relative to that plan file. YAML input/work paths are used as written; inside
+Docker, use `/data/...` or `/app/...`. Alternate files must be inside a mounted
+directory. The AWS bundle currently copies fixed filenames listed in
+[`all_tmd/aws_bundle.py`](all_tmd/aws_bundle.py); supporting arbitrary config
+filenames or additional contract files there requires a code change.
+
+### Training and testing dataset membership
+
+The study always evaluates Sydney using leave-one-participant-out (LOPO): each
+of seven participants supplies one test fold, and that participant's sessions
+never enter that fold's training set. There is no separate `test_dataset` or
+test-directory option. Training membership is determined by the condition:
+
+| Condition | Training data for each held-out Sydney participant |
+| --- | --- |
+| `nor_only` | All prepared NOR-TMD feature rows; no Sydney calibration. |
+| `sydney_only` | Selected whole sessions from the other six Sydney participants. |
+| `nor_plus_sydney` | All prepared NOR-TMD rows plus the same selected Sydney sessions. |
+
+Fractions of 10%, 25%, 50%, 75%, and 100% apply to the available training-pool
+sessions **per class**, not to test size or window count. Selection rounds down
+but keeps at least one session per class; 100% takes all eligible training-pool
+sessions. The saved fold metrics include effective session, window, and duration
+fractions. Test membership stays the same across fractions, conditions, and
+seeds. `study-trial.json`'s `training.calibration_fraction` does not change this.
+
+- **Move inputs or select different NOR files:** edit
+  `sources.nor-tmd.input_dir` / `include_globs` and, if needed,
+  `sources.collector.input_dir` in `model.config.yaml`. NOR inputs must retain
+  the format understood by the NOR adapter. A changed NOR selection needs
+  fresh ingestion/features and a newly tuned/promoted model lock.
+- **Add, remove, or replace Sydney sessions/participants:** copying files into
+  `downloaded_sessions` is insufficient. Extra sessions are ignored, and
+  missing eligible frozen sessions fail verification. Editing the manifest
+  alone also fails: [`all_tmd/study.py`](all_tmd/study.py) checks the published
+  session-ID digest, 166 sessions, seven participants, mode counts, and other
+  snapshot invariants. A new cohort requires changes to these validators,
+  the snapshot and its configured digest, LOPO contracts/tests, and the AWS
+  sync/bundle path where applicable. Keep it as a separately identified study.
+- **Change which people are tested, use a fixed train/test split, or test
+  NOR/US data:** this needs split/evaluation code changes in
+  [`all_tmd/study.py`](all_tmd/study.py) and
+  [`all_tmd/study_runner.py`](all_tmd/study_runner.py), plus corresponding
+  report validation/tests. Hand-editing `sydney-lopo.json` is rejected because
+  the runner regenerates and compares the manifest.
+- **Use US-TMD or a new source in the controlled study:** changing
+  `study-trial.json.train_dataset` is insufficient. Preparation reads that
+  field, but source tuning and study evaluation explicitly load `nor-tmd`.
+  Generalize [`all_tmd/source_tuning.py`](all_tmd/source_tuning.py), the study
+  runner/model-lock checks, condition definitions, and reports. A new input
+  format also needs an adapter in [`all_tmd/ingest.py`](all_tmd/ingest.py).
+- **Change labels, windows, sensors, or quality thresholds:** feature and
+  quality settings are configurable, but labels remain the fixed three-class
+  task. Additional classes require code changes to snapshot checks, selection,
+  metrics, and reporting. Feature/quality changes require rebuilding features
+  and regenerating affected contracts before evaluation.
+
+When changing raw input contents, paths, or globs, use a new `dataset.work_dir`
+(for example `/data/all-tmd-v2-work-custom`) or deliberately version
+`dataset.input_manifest_digest`. The ingestion cache key does not hash raw
+file contents, source paths, or globs; existing `_SUCCESS` entries can otherwise
+reuse old inputs. Automatic detection of such input changes would require code
+changes. Keep the published snapshot digest when reproducing the original study.
+
+For a configurable variant using the same frozen Sydney cohort, copy the config,
+trial, and plan; give it a distinct `study_id`, work directory, result root, and
+new `lopo_manifest` / `model_lock` output paths in the plan. Create their parent
+directories first. Then run `prepare-data`, `create-lopo`, `tune-source`,
+`promote-model`, and `run-study` with those copies. Existing different LOPO
+manifests and model locks are immutable and rejected. Source/feature changes
+require retuning; Sydney changes can also alter the usable-session split.
+Retain the original contracts/results so the published study remains reproducible.
+
+### Number of runs and other training controls
+
+The default study has **33 parent runs**:
+`3 seeds x (1 NOR-only + 5 fractions x 2 Sydney-containing conditions)`.
+Each parent records seven fold runs, giving **231 child runs**, or 264 MLflow
+runs for evaluation when tracking is enabled. Source tuning adds one separate
+MLflow run containing 45 Optuna trials with five validation fits each. The
+NOR-only model is fitted once per seed and reused across its seven test folds;
+the child-run count is therefore not the number of independent model fits.
+
+| Requested adjustment | Supported control or required code change |
+| --- | --- |
+| Run a short local smoke check | Use `run-study --limit 1`; any positive `N` up to 33 selects the first `N` parents in plan order, still with all seven folds each. The first is NOR-only at seed 42. |
+| Run an AWS smoke check | Use `prepare-run.ps1 -Mode Smoke`; the remote runner passes `--limit 1`. `-Mode Full` runs all 33 parents; `-Mode Tune` only tunes the source model. |
+| Change repeats/seeds, conditions, or fraction grid | Editing the plan alone fails. `StudyPlan.load()` enforces seeds `[42, 43, 44]`, the three conditions, and the exact fraction grid. Generalize its validation and `parent_specs()`, review report assumptions/tests, and update the fixed expected count in `all_tmd/aws_bundle.py`. |
+| Change tuning trial count, tuning seed, folds, model family, or selection metric | `source_tuning.py` fixes 45 trials, seed 42, five participant folds, XGBoost, and pooled out-of-fold macro F1. Changing the corresponding `study-trial.json.training` fields has no effect here; expose/wire these controls in code and regenerate the model lock. Search ranges are defined in `all_tmd/models.py`. |
+| Change model parameters during evaluation | `run-study` uses the promoted `model-lock.json` parameters and plan seed without another Optuna search. Promote a fresh tuning result to a new lock path; manual lock edits fail digest validation. |
+| Change weighting or duration balancing | The study runner always uses class-balanced sample weights, with no domain multiplier or duration balancing. Trial fields `weighting_strategy`, `collector_domain_weight`, and `duration_balancing` are not used by this path; change `_fit_fixed_model()` / training selection to support them. |
+| Use GPU or impose a tuning timeout | Both controlled tuning and evaluation explicitly use `xgboost_device="cpu"`; controlled tuning does not pass a timeout to Optuna. YAML `training.xgboost_device` and `training.timeout_seconds` do not affect this path. Wire them into those functions to enable these options. |
+| Change report resampling effort | Edit `study-plan.json.analysis.bootstrap_iterations` (use a positive integer) and `analysis.random_seed`, then rerun `report`. This changes intervals, not training. `study-trial.json.training.bootstrap_iterations` does not control study reports. |
+
+For example, after preparing the data and contracts:
+
+```powershell
+.\scripts\study.ps1 run-study --limit 1 --output-root /data/all-tmd-v2-smoke
+.\scripts\study.ps1 report --results-root /data/all-tmd-v2-smoke --output-dir /data/smoke-report --allow-partial
+```
+
+`--allow-partial` is for inspecting available results; check `study-summary.json`
+and do not treat an incomplete grid as the full study. There is no resume/skip
+flag: every invocation retrains the selected parents with new run IDs. Use a
+separate output root for a subsequent full run. Mixing smoke runs or repeated
+full runs in one report root creates duplicate parent names and fails normal
+report validation.
+
+### Flexible exploratory trials
+
+If the intended experiment does not need the controlled protocol, the retained
+generic pipeline already supports more configuration without changing code:
+
+```powershell
+Copy-Item trials.json.example trials.json
+# Edit trials.json and model.config.yaml before starting.
+.\scripts\run-trials.ps1
+```
+
+This wrapper runs each object in `trials.json` once. Add/remove objects to change
+the number of configurations, or copy an object with different
+`training.random_seed` values for repetitions. `training.optuna_trials` is the
+search budget per Optuna study, not the number of wrapper runs; nested evaluation
+runs separate searches for outer folds and a final model. This pipeline uses
+`training.model_families`, `participant_inner_folds`, `selection_metric`,
+weighting/duration options, and the global timeout/device settings.
+
+Set each object's `train_dataset` to `nor-tmd` or `us-tmd` and configure the
+matching YAML source directory. The example includes both, so remove the US
+object if US data is unavailable. Testing still uses collector data. With
+`training.evaluation_strategy: "session_holdout"`, set
+`training.calibration_fraction` to a scalar or a map covering every label, e.g.
+`{"bus": 0.8, "car": 0.4, "train": 0.4}`. Values must be strictly between 0 and 1;
+the remainder of each class's sessions is held out, with at least one session
+in each side. With `"participant_nested_cv"`, all collector participants rotate
+through test folds and `calibration_fraction` does not set test size. Session
+holdout can share participants across training/testing and is a different
+evaluation protocol from participant holdout.
+
+For eligible collector sessions beyond the frozen snapshot, set
+`dataset.snapshot_manifest: null` in the generic pipeline's YAML and use a fresh
+work directory; country/exclusion and quality filters still apply. This does
+not unfreeze `study.ps1`, which separately validates the plan snapshot. Generic
+trial outputs cannot be substituted for the controlled study's 33-parent report.
 
 ## Local Docker workflow
 
@@ -157,6 +333,81 @@ preserves original IDs and sweep IDs, remaps parents, and is idempotent for each
 `(sweep ID, original run ID)` pair.
 
 ## Report outputs
+
+### Retrieve the full results
+
+For a full local study, use the workflow above without `--limit`. With the
+default output root, `/data/all-tmd-v2-results` is
+`<ALL_TMD_DATA_DIR>/all-tmd-v2-results` on the host (or
+`./data/all-tmd-v2-results` when unset). The files are available directly:
+
+```text
+all-tmd-v2-results/
+|-- tuning/<tuning-run-id>/
+|   |-- tuning-result.json          # selected parameters, score, provenance
+|   `-- optuna-trials.csv           # complete source-search trial table
+`-- <parent-mlflow-run-id>/
+    |-- metrics.json               # pooled metrics, all fold reports, digests
+    |-- predictions.parquet        # every held-out evaluation window
+    |-- lopo-manifest.json          # frozen test/training-pool session membership
+    `-- folds/<held-out-participant>/
+        |-- metrics.json           # fold metrics, counts, selection, fingerprints
+        `-- predictions.parquet    # this participant's evaluation windows
+```
+
+Metrics include accuracy, balanced accuracy, macro F1, confusion-matrix counts,
+and per-class precision/recall/F1/support. Parent metrics are computed from
+pooled fold predictions. Prediction tables include participant/session IDs,
+window timestamps, true labels, predicted labels, and class probabilities.
+Read them with `pandas.read_parquet(...)`; use `.to_csv(..., index=False)` if a
+CSV is needed. Parent directories retain these files even with MLflow disabled
+(in that case the directory ID is generated locally).
+
+MLflow at <http://localhost:5002> shows the configured experiment, parent/fold
+metrics, dataset inputs, and downloadable artifacts. Its backend/artifact store
+defaults to this repository's `data/all-tmd-v2-mlflow`, independently of
+`ALL_TMD_DATA_DIR`; `ALL_TMD_MLFLOW_DATA_DIR` overrides it. Archive that store,
+raw result directories, config/trial/plan files, snapshot, model lock, LOPO
+manifest, dependency lock, and code commit when retaining a complete study.
+
+The controlled runner saves predictions and parameters but **does not serialize
+fitted fold models or export ONNX**. Recoverable fitted-model artifacts require
+adding serialization/model logging in `study_runner.py`. The generic trial
+pipeline separately writes `model.joblib`, `metrics.json`, trial configuration,
+and Optuna tables under
+`<work-dir>/<config-hash>/reports/<train-dataset>/<trial-hash>`; those are
+exploratory outputs, not controlled fold models. Repeating an identical generic
+trial reuses that report path, so archive it or use a new work directory to
+retain separate copies.
+
+For AWS, download after completion and check `run/run-summary.json` for a zero
+exit code. An AWS sweep ID identifies the entire job; it differs from the
+individual MLflow parent/child IDs. The download contains `results/`,
+`mlflow/mlflow.db`, `mlflow/mlartifacts/`, and `run/` logs/resource usage.
+Downloading results alone does not generate the final report. For example,
+with `ALL_TMD_DATA_DIR=D:/tmd-data`:
+
+```powershell
+.\scripts\aws\download-results.ps1 -RunId <sweep-id> -Destination D:\tmd-data\aws-results\<sweep-id>
+.\scripts\aws\view-results.ps1 -RunId <sweep-id> -ResultsRoot D:\tmd-data\aws-results
+.\scripts\study.ps1 report --results-root /data/aws-results/<sweep-id>/results --output-dir /data/report-artifacts/<sweep-id>
+```
+
+The downloaded-run viewer uses <http://127.0.0.1:5003> by default; stop it with
+`.\scripts\aws\view-results.ps1 -Stop`. Alternatively, import the store using
+the preceding section. For import/report commands, the download must be under
+the host directory mounted at `/data`; a download to the repository's
+`aws-results` directory is instead visible at `/app/aws-results` in the study
+container. Use the matching plan when reporting a variant.
+
+An AWS `Tune` job only supplies `results/tuning/<tuning-run-id>/...`. Download
+it, run `promote-model --run-id <tuning-run-id>` with `--output-root` pointing
+to that downloaded `results` directory, and ensure the matching LOPO manifest
+exists before preparing a `Full` bundle. A `Smoke` job is also incomplete by
+design. To obtain the full comparison, finish a `Full` job and generate the
+report from its `results` directory.
+
+### Generate summary charts and tables
 
 After all 33 parents exist, `report` validates the grid/shared evaluation digest
 and writes:
