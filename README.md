@@ -423,7 +423,7 @@ and writes:
 
 The two mode-metric CSVs contain `study_id`, `run_id`, `run_name`, `condition`,
 `sydney_fraction`, `seed`, `model_lock_digest`, `transport_mode`, `support`,
-`precision`, `recall`, `f1`, `accuracy`, and `balanced_accuracy`. Fold rows also
+`precision`, `recall`, `f1`, and `accuracy`. Fold rows also
 contain `fold` and `held_out_participant_id`; their `run_id` identifies the parent.
 Rows retain individual seeds and runs, sorted by condition, fraction, seed, run
 identity, fold (where applicable), and configured mode order. The complete study
@@ -431,17 +431,14 @@ has 99 parent-mode rows and 693 fold-mode rows when all seven folds are present.
 Parent scores use pooled evaluation windows, not averages of fold scores.
 
 Precision, recall, F1, and support come from saved per-class metrics. Accuracy
-and balanced accuracy treat the row's mode as positive and all other modes as
-negative, using the saved confusion matrix:
+treats the row's mode as positive and all other modes as negative, using the saved
+confusion matrix: `accuracy = (TP + TN) / (TP + TN + FP + FN)`.
 
-- `accuracy = (TP + TN) / (TP + TN + FP + FN)`;
-- `balanced_accuracy = (TP / (TP + FN) + TN / (TN + FP)) / 2`.
-
-These are per-mode one-vs-rest scores; the existing transfer curves retain their
-overall multiclass metrics. Scores are proportions from 0 to 1 without explicit
-rounding, and support counts evaluation windows. Undefined precision, recall,
-and F1 retain the existing zero values. Balanced accuracy is blank if positive
-or negative support is absent; accuracy is blank for an empty evaluation.
+The mode CSVs omit balanced accuracy. Overall multiclass balanced accuracy
+remains available in saved metrics and the aggregate reports. Scores are
+proportions from 0 to 1 without explicit rounding, and support counts evaluation
+windows. Undefined precision, recall,
+and F1 retain the existing zero values. Accuracy is blank for an empty evaluation.
 Older artifacts without run IDs have blank IDs, and artifacts without embedded
 folds contribute no fold rows. Both CSVs always include their column headers.
 `--allow-partial` exports the available runs under the existing validation rules.

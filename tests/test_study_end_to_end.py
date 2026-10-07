@@ -206,7 +206,7 @@ def test_report_generates_complete_tables_figures_and_paired_intervals(
     columns = [
         "study_id", "run_id", "run_name", "condition", "sydney_fraction", "seed",
         "model_lock_digest", "transport_mode", "support", "precision", "recall",
-        "f1", "accuracy", "balanced_accuracy",
+        "f1", "accuracy",
     ]
     assert list(parents.columns) == columns
     assert list(fold_metrics.columns) == columns[:7] + ["fold", "held_out_participant_id"] + columns[7:]
@@ -243,7 +243,6 @@ def test_report_generates_complete_tables_figures_and_paired_intervals(
                 assert getattr(row, metric) == pytest.approx(fold["metrics"]["per_class"][row.transport_mode][metric])
         bus = fold_metrics.loc[(fold_metrics["fold"] == 0) & (fold_metrics["transport_mode"] == "bus")].iloc[0]
         assert bus.accuracy == pytest.approx(2 / 3)
-        assert bus.balanced_accuracy == pytest.approx(0.5)
 
 
 def _feature_row(

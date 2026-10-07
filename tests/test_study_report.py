@@ -26,13 +26,13 @@ def test_mode_metrics_use_one_vs_rest_counts_and_configured_label_order():
     rows = _mode_metric_rows(metrics, labels)
     assert [row["transport_mode"] for row in rows] == list(labels)
     expected = [
-        (6, 4 / 6, 4 / 6, 2 / 3, 16 / 20, (4 / 6 + 12 / 14) / 2),
-        (5, 3 / 6, 3 / 5, 6 / 11, 15 / 20, (3 / 5 + 12 / 15) / 2),
-        (9, 7 / 8, 7 / 9, 14 / 17, 17 / 20, (7 / 9 + 10 / 11) / 2),
+        (6, 4 / 6, 4 / 6, 2 / 3, 16 / 20),
+        (5, 3 / 6, 3 / 5, 6 / 11, 15 / 20),
+        (9, 7 / 8, 7 / 9, 14 / 17, 17 / 20),
     ]
     for row, values in zip(rows, expected):
         assert [row[key] for key in (
-            "support", "precision", "recall", "f1", "accuracy", "balanced_accuracy"
+            "support", "precision", "recall", "f1", "accuracy"
         )] == pytest.approx(values)
         assert row["accuracy"] != pytest.approx(metrics["accuracy"])
         assert row["accuracy"] != pytest.approx(row["recall"])
@@ -49,15 +49,8 @@ def test_mode_metrics_handle_absent_classes_and_predictions(matrix):
     assert train["support"] == 0
     assert train["precision"] == train["recall"] == train["f1"] == 0
     assert train["accuracy"] == 1
-    assert train["balanced_accuracy"] is None
     assert car["precision"] == car["recall"] == car["f1"] == 0
     assert bus["accuracy"] == pytest.approx(2 / 3)
-    if matrix[1][0]:
-        assert bus["balanced_accuracy"] == 0.5
-        assert car["balanced_accuracy"] == 0.5
-    else:
-        assert bus["balanced_accuracy"] is None
-        assert car["balanced_accuracy"] is None
 
 
 def test_csv_exports_preserve_runs_write_blanks_and_sort_deterministically(tmp_path):
@@ -86,7 +79,8 @@ def test_csv_exports_preserve_runs_write_blanks_and_sort_deterministically(tmp_p
     parents, folds = [pd.read_csv(path, keep_default_na=False) for path in paths]
     assert parents["run_id"].tolist() == ["a"] * 3 + ["b"] * 3
     assert parents["transport_mode"].tolist() == list(plan.labels) * 2
-    assert parents["balanced_accuracy"].eq("").all()
+    assert "balanced_accuracy" not in parents.columns
+    assert "balanced_accuracy" not in folds.columns
     assert folds["fold"].tolist() == [0] * 3 + [1] * 3
     assert folds.loc[folds["fold"] == 1, "accuracy"].eq("").all()
     _write_mode_metrics([], plan, tmp_path)

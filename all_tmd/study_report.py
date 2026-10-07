@@ -24,7 +24,7 @@ REPORT_FILES = (*MODE_FILES, *CURVE_FILES, "per-class-performance.png", *PAIRED_
 RUN_MODE_COLUMNS = (
     "study_id", "run_id", "run_name", "condition", "sydney_fraction", "seed",
     "model_lock_digest", "transport_mode", "support", "precision", "recall",
-    "f1", "accuracy", "balanced_accuracy",
+    "f1", "accuracy",
 )
 FOLD_MODE_COLUMNS = RUN_MODE_COLUMNS[:7] + (
     "fold", "held_out_participant_id",
@@ -152,7 +152,7 @@ def report_study(
 def _mode_metric_rows(
     metrics: dict[str, Any], labels: dict[str, int]
 ) -> list[dict[str, Any]]:
-    """Derive one-vs-rest scores in the saved confusion matrix's label order."""
+    """Copy per-class metrics and derive one-vs-rest accuracy in label order."""
     matrix = np.asarray(metrics["confusion_matrix"], dtype=np.int64)
     total = int(matrix.sum())
     rows = []
@@ -171,10 +171,6 @@ def _mode_metric_rows(
                 "recall": detail["recall"],
                 "f1": detail["f1"],
                 "accuracy": (tp + tn) / total if total else None,
-                "balanced_accuracy": (
-                    (tp / positive + tn / negative) / 2
-                    if positive and negative else None
-                ),
             }
         )
     return rows
